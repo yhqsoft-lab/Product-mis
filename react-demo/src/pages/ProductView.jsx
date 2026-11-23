@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { safeFetch } from '../utils/safeFetch';
 
 // ✅ 提取统一的图片处理组件，用于优雅地处理图片和默认图
 const formatImageUrl = (img, baseUrl) => {
@@ -51,7 +52,7 @@ export default function ProductSearch() {
   // 获取所有产品（用于关联产品的信息显示）
   const fetchAllProducts = useCallback(async () => {
     try {
-      const res = await fetch(API_PRODUCTS);
+      const res = await safeFetch(API_PRODUCTS);
       if (!res.ok) throw new Error('获取产品列表失败');
       const data = await res.json();
       setAllProducts(data);
@@ -69,7 +70,7 @@ export default function ProductSearch() {
         ? `${API_PRODUCTS}?search=${encodeURIComponent(search)}`
         : API_PRODUCTS;
 
-      const res = await fetch(url);
+      const res = await safeFetch(url);
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || `HTTP ${res.status}`);
@@ -87,11 +88,10 @@ export default function ProductSearch() {
     }
   }, [API_PRODUCTS]);
 
-  // 初始化加载
+  // 初始化加载全量产品（供关联弹窗匹配）
   useEffect(() => {
-    fetchProducts();
     fetchAllProducts();
-  }, [fetchProducts, fetchAllProducts]);
+  }, [fetchAllProducts]);
 
   // 防抖搜索
   useEffect(() => {

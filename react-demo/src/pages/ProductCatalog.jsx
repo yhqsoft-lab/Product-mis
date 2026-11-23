@@ -1,6 +1,7 @@
 // src/pages/ProductCatalog.jsx
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { safeFetch } from '../utils/safeFetch';
 
 export default function ProductCatalog() {
   const [products, setProducts] = useState([]);
@@ -19,7 +20,7 @@ export default function ProductCatalog() {
         ? `/api/products?search=${encodeURIComponent(search)}`
         : '/api/products';
 
-      const res = await fetch(url);
+      const res = await safeFetch(url);
       if (!res.ok) throw new Error('无法加载产品数据');
       const data = await res.json();
       setProducts(data);
@@ -48,8 +49,8 @@ export default function ProductCatalog() {
     setSearchTerm(e.target.value);
   };
 
-  const viewProductDetail = (id) => {
-    navigate(`/product/${id}`);
+  const viewProductDetail = () => {
+    navigate('/productview');
   };
 
   // ✅ 处理外部链接（确保有协议）

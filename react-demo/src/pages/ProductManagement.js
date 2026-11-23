@@ -6,6 +6,7 @@ import { useUser } from '../context/useUser';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ProductRelationsManager from '../components/ProductRelationsManager';
 import { fetchWithAuth } from '../utils/fetchWithAuth';
+import { safeFetch } from '../utils/safeFetch';
 
 export default function ProductManagement() {
   // ✅ 修复 2：正确解构 token（独立字段，不是 user.token）
@@ -133,11 +134,11 @@ export default function ProductManagement() {
     }
   }, [API_PRODUCTS]);
 
-  // 初始化加载
+  // 初始化加载全量产品
   useEffect(() => {
-    fetchProducts();
+    if (isUserLoading || (!user && !token)) return;
     fetchAllProducts();
-  }, [fetchProducts, fetchAllProducts]);
+  }, [fetchAllProducts, isUserLoading, user, token]);
 
   // 防抖校验函数
   const checkUniqueField = useCallback(async (field, value, productId = null) => {
@@ -158,6 +159,7 @@ export default function ProductManagement() {
 
   // 防抖搜索
   useEffect(() => {
+    if (isUserLoading || (!user && !token)) return;
     if (searchTerm.trim() === '') {
       fetchProducts();
       return;
@@ -167,7 +169,7 @@ export default function ProductManagement() {
       fetchProducts(searchTerm);
     }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm, fetchProducts]);
+  }, [searchTerm, fetchProducts, isUserLoading, user, token]);
 
   const handleSearchChange = (e) => {
     const value = e.target.value;
@@ -327,7 +329,7 @@ const handleSubmit = async (e) => {
       if (pdfFile) formData.append('manual', pdfFile);
 
       // ✅ 修复：弃用 fetchWithAuth，改用标准 fetch 显式携带 Token
-      response = await fetch(url, {
+      response = await safeFetch(url, {
         method: isEditing ? 'PUT' : 'POST',
         headers: { 'Authorization': `Bearer ${token}` }, // ⚠️ 不要手动设置 Content-Type
         body: formData,
@@ -354,7 +356,7 @@ const handleSubmit = async (e) => {
       }
 
       // ✅ 修复：显式携带 Content-Type 和 Authorization
-      response = await fetch(url, {
+      response = await safeFetch(url, {
         method: isEditing ? 'PUT' : 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -418,7 +420,7 @@ const handleSubmit = async (e) => {
     }
 
     try {
-      const res = await fetch(`${API_PRODUCTS}/${deleteId}`, {
+      const res = await safeFetch(`${API_PRODUCTS}/${deleteId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,

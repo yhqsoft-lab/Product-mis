@@ -1,4 +1,5 @@
 // src/utils/fetchWithAuth.js - 简化版本
+import { safeFetch } from './safeFetch';
 
 const getToken = () => {
   try {
@@ -71,7 +72,7 @@ export const fetchWithAuth = (url, options = {}) => {
     body = JSON.stringify(body);
   }
 
-  return fetch(url, {
+  return safeFetch(url, {
     ...options,
     headers,
     body

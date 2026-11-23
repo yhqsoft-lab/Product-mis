@@ -26,6 +26,10 @@ app.use(helmet({
   contentSecurityPolicy: false,
   frameguard: false,
   crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: false,
+  originAgentCluster: false,
+  referrerPolicy: false,
+  hsts: false,
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
@@ -33,9 +37,14 @@ app.use(helmet({
 app.use(cors({
   origin: process.env.FRONTEND_URL || true,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
 }));
+
+// ✅ 禁止 API 响应被代理或浏览器错误缓存
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 // ✅ JSON 解析（必须在所有路由之前，但不会影响 Multer 路由）
 app.use(express.json());
@@ -185,7 +194,7 @@ const startServer = async () => {
 
   const PORT = 3000;
   const HOST = '0.0.0.0';
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     console.log(`🚀 服务运行在 http://${HOST}:${PORT}`);
     console.log(`📁 静态文件目录: ${path.join(__dirname, 'public/uploads')}`);
     console.log(`🌐 API 地址: http://${HOST}:${PORT}/api`);
@@ -193,6 +202,9 @@ const startServer = async () => {
     console.log(`🔌 FCC 管理: http://${HOST}:${PORT}/api/fccs`);
     console.log(`📦 产品管理: http://${HOST}:${PORT}/api/products`);
   });
+  // Keep-alive timeout higher than reverse proxy / Cloud Run default (60s) to prevent TCP RST
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
 };
 
 // 优雅关闭

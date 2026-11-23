@@ -73,6 +73,7 @@ const AppRoutes = () => {
             <Route path="/products" element={<ProductManagement />} />
           </Route>
           <Route path="/" element={<Navigate to="/productview" replace />} />
+          <Route path="*" element={<Navigate to="/productview" replace />} />
         </Route>
       </Routes>
 

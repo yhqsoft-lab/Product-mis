@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 // ✅ 修复 1：导入路径必须与实际文件一致
 import { useUser } from '../context/useUser';
 import { useToast } from '../components/useToast';
+import { safeFetch } from '../utils/safeFetch';
 
 export default function LoginPage() {
   const [isRegistering, setIsRegistering] = useState(false);
@@ -66,7 +67,7 @@ export default function LoginPage() {
     try {
       if (isRegistering) {
         // 注册逻辑（直接调用后端接口）
-        const res = await fetch('/api/auth/register', {
+        const res = await safeFetch('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -97,9 +98,7 @@ export default function LoginPage() {
     }
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') handleSubmit(e);
-  };
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
@@ -124,7 +123,6 @@ export default function LoginPage() {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              onKeyPress={handleKeyPress}
               placeholder="请输入用户名"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
               required
@@ -142,7 +140,6 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              onKeyPress={handleKeyPress}
               placeholder="请输入密码"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
               required
@@ -161,7 +158,6 @@ export default function LoginPage() {
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                onKeyPress={handleKeyPress}
                 placeholder="请确认密码"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 required

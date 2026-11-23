@@ -1,4 +1,6 @@
 // src/utils/apiClient.js
+import { safeFetch } from './safeFetch';
+
 export const apiClient = async (url, options = {}) => {
   let token = localStorage.getItem('auth_token') || localStorage.getItem('authToken');
 
@@ -24,5 +26,5 @@ export const apiClient = async (url, options = {}) => {
     }
   };
 
-  return fetch(url, config);
+  return safeFetch(url, config);
 };

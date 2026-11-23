@@ -5,6 +5,7 @@ import { useUser } from '../context/useUser';
 import ConfirmDialog from '../components/ConfirmDialog';
 import AddProductToFccForm from '../components/AddProductToFccForm';
 import FccProductList from '../components/FccProductList';
+import { safeFetch } from '../utils/safeFetch';
 
 // ✅ 统一的图片路径处理工具函数
 export const formatImageUrl = (img, baseUrl = '') => {
@@ -131,7 +132,7 @@ export default function FccManagement() {
     setError(null);
     try {
       const url = search ? `${API_URL}?search=${encodeURIComponent(search)}` : API_URL;
-      const res = await fetch(url, { headers: getAuthHeaders() });
+      const res = await safeFetch(url, { headers: getAuthHeaders() });
       if (!isMounted) return;
 
       if (!res.ok) {
@@ -170,10 +171,7 @@ export default function FccManagement() {
   }, [user, token, isUserLoading, navigate]);
 
   useEffect(() => {
-    fetchFccs();
-  }, [fetchFccs]);
-
-  useEffect(() => {
+    if (isUserLoading || (!user && !token)) return;
     if (searchTerm.trim() === '') {
       fetchFccs();
       return;
@@ -182,7 +180,7 @@ export default function FccManagement() {
       fetchFccs(searchTerm);
     }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm, fetchFccs]);
+  }, [searchTerm, fetchFccs, isUserLoading, user, token]);
 
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
@@ -190,7 +188,7 @@ export default function FccManagement() {
 
   const fetchAvailableProducts = async () => {
     try {
-      const res = await fetch(PRODUCT_API_URL, { headers: getAuthHeaders() });
+      const res = await safeFetch(PRODUCT_API_URL, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error('获取产品列表失败');
       const data = await res.json();
       setAvailableProducts(Array.isArray(data) ? data : []);
@@ -205,7 +203,7 @@ export default function FccManagement() {
     setProductManagementLoading(true);
     setProductManagementError('');
     try {
-      const res = await fetch(`${API_URL}/${selectedFcc.id}/products`, {
+      const res = await safeFetch(`${API_URL}/${selectedFcc.id}/products`, {
         headers: getAuthHeaders()
       });
       if (!res.ok) throw new Error('获取关联产品失败');
@@ -240,7 +238,7 @@ export default function FccManagement() {
 
   const handleRemoveProduct = async (productId) => {
     try {
-      const res = await fetch(`${API_URL}/${selectedFcc.id}/products/${productId}`, {
+      const res = await safeFetch(`${API_URL}/${selectedFcc.id}/products/${productId}`, {
         method: 'DELETE',
         headers: getAuthHeaders()
       });
@@ -395,7 +393,7 @@ export default function FccManagement() {
       const method = editingFcc ? 'PUT' : 'POST';
       const url = editingFcc ? `${API_URL}/${editingFcc.id}` : API_URL;
 
-      const res = await fetch(url, {
+      const res = await safeFetch(url, {
         method,
         headers: getAuthHeaders(),
         body: formData
@@ -457,7 +455,7 @@ export default function FccManagement() {
     if (!deleteId) return;
 
     try {
-      const res = await fetch(`${API_URL}/${deleteId}`, {
+      const res = await safeFetch(`${API_URL}/${deleteId}`, {
         method: 'DELETE',
         headers: getAuthHeaders()
       });

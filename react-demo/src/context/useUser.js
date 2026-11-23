@@ -1,5 +1,6 @@
 // src/context/useUser.js
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { safeFetch } from '../utils/safeFetch';
 
 const UserContext = createContext(null);
 
@@ -136,7 +137,7 @@ export const UserProvider = ({ children }) => {
 
         if (savedToken && savedUser) {
           try {
-            const res = await fetch('/api/auth/me', {
+            const res = await safeFetch('/api/auth/me', {
               headers: {
                 'Authorization': `Bearer ${savedToken}`,
                 'Content-Type': 'application/json'
@@ -174,7 +175,7 @@ export const UserProvider = ({ children }) => {
 
   // ✅ 登录方法
   const login = useCallback(async (credentials) => {
-    const res = await fetch('/api/auth/login', {
+    const res = await safeFetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(credentials)
@@ -216,7 +217,7 @@ export const UserProvider = ({ children }) => {
     if (!refreshToken) return false;
 
     try {
-      const res = await fetch('/api/auth/refresh', {
+      const res = await safeFetch('/api/auth/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken })

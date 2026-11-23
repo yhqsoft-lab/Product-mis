@@ -1,5 +1,6 @@
 // src/components/AddProductToFccForm.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState } from 'react';
+import { safeFetch } from '../utils/safeFetch';
 
 
 export default function AddProductToFccForm({
@@ -22,7 +23,7 @@ const API_URL = '';
     setAssociateLoading(true);
     setError('');
     try {
-      const response = await fetch(`${API_URL}/api/fccs/${fccId}/products`, {
+      const response = await safeFetch(`${API_URL}/api/fccs/${fccId}/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productId: selectedProductId })
