@@ -1,0 +1,37 @@
+{
+  "name": "product-fcc-management",
+  "version": "1.0.0",
+  "description": "Product & FCC Management System (React + Express)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yhqsoft-lab/product_cms.git"
+  },
+  "homepage": "https://github.com/yhqsoft-lab/product_cms#readme",
+  "bugs": {
+    "url": "https://github.com/yhqsoft-lab/product_cms/issues"
+  },
+  "scripts": {
+    "build:frontend": "node -e \"const fs=require('fs'),{execSync}=require('child_process');if(!fs.existsSync('react-demo/node_modules'))execSync('npm --prefix react-demo install --legacy-peer-deps --no-audit --no-fund',{stdio:'inherit'});execSync('npm --prefix react-demo run build',{stdio:'inherit'});\"",
+    "build": "npm run build:frontend",
+    "dev": "node backend/app.js",
+    "start": "node backend/app.js"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.1.10"
+  },
+  "dependencies": {
+    "@tailwindcss/line-clamp": "^0.4.4",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.5",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.12.1",
+    "multer": "^2.5.0",
+    "mysql2": "^3.24.6",
+    "sequelize": "^6.37.8",
+    "use-debounce": "^10.1.0"
+  }
+}
