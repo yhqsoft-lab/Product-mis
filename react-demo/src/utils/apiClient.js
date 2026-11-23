@@ -1,6 +1,6 @@
 // src/utils/apiClient.js
 export const apiClient = async (url, options = {}) => {
-  let token = localStorage.getItem('authToken');
+  let token = localStorage.getItem('auth_token') || localStorage.getItem('authToken');
 
   // ✅ 兼容旧版存储格式
   if (!token) {

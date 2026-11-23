@@ -34,9 +34,8 @@ const ImageWithFallback = ({ src, alt, className, randomId = 'default' }) => {
 };
 
 export default function FccManagement() {
-  const { user, loading: isUserLoading } = useUser();
+  const { user, token, loading: isUserLoading } = useUser();
   const navigate = useNavigate();
-  const token = user?.token;
 
   // ✅ FCC 管理状态
   const [fccs, setFccs] = useState([]);

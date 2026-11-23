@@ -58,7 +58,6 @@
     "url": "git+https://github.com/yhqsoft-lab/product_cms.git",
     "directory": "react-demo"
   },
-  "homepage": "https://github.com/yhqsoft-lab/product_cms#readme",
   "bugs": {
     "url": "https://github.com/yhqsoft-lab/product_cms/issues"
   },

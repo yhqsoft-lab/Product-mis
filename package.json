@@ -13,7 +13,7 @@
   "scripts": {
     "build:frontend": "node -e \"const fs=require('fs'),{execSync}=require('child_process');if(!fs.existsSync('react-demo/node_modules'))execSync('npm --prefix react-demo install --legacy-peer-deps --no-audit --no-fund',{stdio:'inherit'});execSync('npm --prefix react-demo run build',{stdio:'inherit'});\"",
     "build": "npm run build:frontend",
-    "dev": "node backend/app.js",
+    "dev": "node -e \"const fs=require('fs'),{execSync}=require('child_process');if(!fs.existsSync('react-demo/build/index.html'))execSync('npm run build:frontend',{stdio:'inherit'});\" && node backend/app.js",
     "start": "node backend/app.js"
   },
   "devDependencies": {

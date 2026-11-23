@@ -155,7 +155,7 @@ export default function ProductSearch() {
     if (!isOpen) return null;
 
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z- p-4">
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto shadow-2xl">
           <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center z-10">
             <h3 className="text-lg font-bold text-gray-800">{title}</h3>

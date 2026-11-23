@@ -26,7 +26,7 @@ export const UserProvider = ({ children }) => {
   // 🚀 核心修复：定义路由白名单，拦截不必要的跳转
   const redirectIfNotPublic = () => {
     // 允许免登录驻留的公开页面
-    const publicPaths = ['/login', '/fccview', '/productview'];
+    const publicPaths = ['/login', '/fccview', '/productview', '/productcatalog'];
     const currentPath = window.location.pathname.toLowerCase();
 
     // 如果当前路径不在白名单中，才强制跳转到 /login
@@ -145,7 +145,7 @@ export const UserProvider = ({ children }) => {
 
             if (res.ok) {
               const responseData = await res.json();
-              const userData = responseData.data || responseData;
+              const userData = responseData.data?.user || responseData.user || responseData.data || responseData;
               setToken(savedToken);
               setUser(userData);
             } else {

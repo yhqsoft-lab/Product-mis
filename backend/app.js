@@ -81,12 +81,16 @@ app.use('/api', (req, res) => {
 // ✅ 前端 SPA 静态资源与回退路由（在 API 路由之后）
 const frontendBuildPath = path.join(__dirname, '../react-demo/build');
 const frontendIndexPath = path.join(frontendBuildPath, 'index.html');
-if (fs.existsSync(frontendBuildPath)) {
-  app.use(express.static(frontendBuildPath));
-}
+app.use(express.static(frontendBuildPath));
 
 app.use((req, res, next) => {
-  if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/uploads')) {
+  if (
+    req.method === 'GET' &&
+    !req.path.startsWith('/api') &&
+    !req.path.startsWith('/uploads') &&
+    !req.path.startsWith('/images') &&
+    !req.path.startsWith('/static')
+  ) {
     if (fs.existsSync(frontendIndexPath)) {
       return res.sendFile(frontendIndexPath);
     }
