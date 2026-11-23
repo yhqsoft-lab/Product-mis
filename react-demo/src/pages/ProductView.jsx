@@ -1,67 +1,84 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import {
+  ExternalLink,
+  FileText,
+  Info
+} from 'lucide-react';
 import { safeFetch } from '../utils/safeFetch';
-
-// ✅ 提取统一的图片处理组件，用于优雅地处理图片和默认图
-const formatImageUrl = (img, baseUrl) => {
-  if (!img || img === 'null' || img === 'undefined') return null;
-  if (img.startsWith('http') || img.startsWith('data:')) return img;
-  return `${baseUrl}${img.startsWith('/') ? img : '/' + img}`;
-};
-
-const ImageWithFallback = ({ src, alt, className, fallbackText = "无图片" }) => {
-  const [error, setError] = useState(false);
-  if (!src || error) {
-    return (
-      <div className={`bg-gray-100 flex items-center justify-center text-gray-400 ${className}`}>
-        <div className="text-center flex flex-col items-center">
-          <svg className="w-8 h-8 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          <span className="text-xs font-medium">{fallbackText}</span>
-        </div>
-      </div>
-    );
-  }
-  return <img src={src} alt={alt} className={className} onError={() => setError(true)} loading="lazy" />;
-};
+import { useFooterRight } from '../components/DashboardLayout';
+import {
+  formatMediaUrl,
+  getStatusMeta,
+  MediaThumb,
+  PageToolbar,
+  CardGridSkeleton,
+  EmptyState,
+  ErrorState,
+  ProductDetailModal,
+  ProductRelationModal
+} from '../components/CatalogUI';
 
 export default function ProductSearch() {
-  // 页面状态
   const [products, setProducts] = useState([]);
-  const [allProducts, setAllProducts] = useState([]); // 用于 relations 下拉选项或弹窗展示
+  useFooterRight(products.length > 0 ? `当前显示 ${products.length} 个产品` : '');
+  const [allProducts, setAllProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searching, setSearching] = useState(false);
 
-  // 关系查看状态
-  const [showApplicableModal, setShowApplicableModal] = useState(false);
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [showReplacementModal, setShowReplacementModal] = useState(false);
-  const [selectedProductForView, setSelectedProductForView] = useState(null);
+  // 关联产品查看状态（统一 Tab 弹窗）
+  const [relationModalState, setRelationModalState] = useState({
+    isOpen: false,
+    product: null,
+    initialTab: 'compatible'
+  });
 
-  // 详情模态框状态
-  const [showDetailModal, setShowDetailModal] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
+  const openRelationModal = useCallback((product, tab = 'compatible') => {
+    setRelationModalState({
+      isOpen: true,
+      product,
+      initialTab: tab
+    });
+  }, []);
+
+  const closeRelationModal = useCallback(() => {
+    setRelationModalState((prev) => ({ ...prev, isOpen: false }));
+  }, []);
+
+  // 详情模态框堆栈（支持点击关联产品弹出新详情弹窗）
+  const [detailModalStack, setDetailModalStack] = useState([]);
+
+  const openDetailModal = useCallback((product, relationLabel = '') => {
+    if (!product) return;
+    setDetailModalStack((prev) => {
+      if (prev.length > 0 && prev[prev.length - 1].product?.id === product.id) {
+        return prev;
+      }
+      return [...prev, { product, relationLabel }];
+    });
+  }, []);
+
+  const closeTopDetailModal = useCallback(() => {
+    setDetailModalStack((prev) => prev.slice(0, -1));
+  }, []);
 
   // API 地址（仅当配置了完整 http(s) 地址时使用，否则使用同源相对路径）
   const rawApiBase = process.env.REACT_APP_API_BASE || '';
   const BASE_URL = /^https?:\/\//i.test(rawApiBase) ? rawApiBase.replace(/\/+$/, '') : '';
   const API_PRODUCTS = `${BASE_URL}/api/products`;
 
-  // 获取所有产品（用于关联产品的信息显示）
   const fetchAllProducts = useCallback(async () => {
     try {
       const res = await safeFetch(API_PRODUCTS);
       if (!res.ok) throw new Error('获取产品列表失败');
       const data = await res.json();
-      setAllProducts(data);
+      setAllProducts(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('获取所有产品失败:', err);
     }
   }, [API_PRODUCTS]);
 
-  // 获取产品数据（带搜索）
   const fetchProducts = useCallback(async (search = '') => {
     setLoading(true);
     setError(null);
@@ -77,7 +94,7 @@ export default function ProductSearch() {
       }
 
       const data = await res.json();
-      setProducts(data);
+      setProducts(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('❌ 获取产品失败:', err);
       setError(err.message);
@@ -88,12 +105,10 @@ export default function ProductSearch() {
     }
   }, [API_PRODUCTS]);
 
-  // 初始化加载全量产品（供关联弹窗匹配）
   useEffect(() => {
     fetchAllProducts();
   }, [fetchAllProducts]);
 
-  // 防抖搜索
   useEffect(() => {
     if (searchTerm.trim() === '') {
       fetchProducts();
@@ -103,647 +118,288 @@ export default function ProductSearch() {
     setSearching(true);
     const timer = setTimeout(() => {
       fetchProducts(searchTerm);
-    }, 500);
+    }, 450);
 
     return () => clearTimeout(timer);
   }, [searchTerm, fetchProducts]);
 
-  // 搜索输入处理
   const handleSearchChange = (e) => {
     const value = e.target.value;
     setSearchTerm(value);
-
     if (value.trim() === '') {
       setSearching(false);
     }
   };
 
-  // 清除搜索
   const clearSearch = () => {
     setSearchTerm('');
-    fetchProducts();
+    setSearching(false);
   };
 
-  // 获取产品图片 URL
-  const getProductImageUrl = (product) => {
-    if (!product.image || product.image === 'null' || product.image === 'undefined') {
-      return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDMwMCAyMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjMwMCIgaGVpZ2h0PSIyMDAiIGZpbGw9IiNmMGYwZjAiLz48dGV4dCB4PSIxNTAiIHk9IjEwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjNjY2Ij5ObyBJbWFnZTwvdGV4dD48L3N2Zz4=';
-    }
-    if (product.image.startsWith('http') || product.image.startsWith('data:')) {
-      return product.image;
-    }
-    return `${BASE_URL}${product.image.startsWith('/') ? product.image : '/' + product.image}`;
-  };
-
-  // 处理图片加载错误
-  const handleImageError = (e) => {
-    e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDMwMCAyMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjMwMCIgaGVpZ2h0PSIyMDAiIGZpbGw9IiNmNWY1ZjUiLz48dGV4dCB4PSIxNTAiIHk9IjEwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjOTk5Ij5JbWFnZSBFcnJvcjwvdGV4dD48L3N2Zz4=';
-    e.target.onerror = null;
-  };
-
-  // 获取关联产品对象数组
   const getRelatedProducts = (ids) => {
     if (!ids || !Array.isArray(ids)) return [];
     return ids
-      .map(id => allProducts.find(p => p.id === id))
-      .filter(p => p);
+      .map((id) => allProducts.find((p) => p.id === id))
+      .filter(Boolean);
   };
 
-  // 渲染关系查看模态框
-  // 渲染关系查看模态框
-  const renderRelationModal = (isOpen, onClose, title, relatedProducts) => {
-    if (!isOpen) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto shadow-2xl">
-          <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center z-10">
-            <h3 className="text-lg font-bold text-gray-800">{title}</h3>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          <div className="p-6">
-            {relatedProducts.length > 0 ? (
-              <div className="space-y-4">
-                {relatedProducts.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
-                    onClick={() => {
-                  //    onClose();                  // 1. 关闭当前的关系列表模态框
-                      setSelectedProduct(p);      // 2. 将选中的产品更新为被点击的这个关联产品
-                      setShowDetailModal(true);   // 3. 触发并打开产品详情模态框
-                    }}
-                  >
-                    <div className="w-12 h-12 bg-gray-100 rounded mr-4 overflow-hidden flex-shrink-0">
-                      <img
-                        src={getProductImageUrl(p)}
-                        alt={p.model}
-                        className="w-full h-full object-cover"
-                        onError={handleImageError}
-                      />
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-800">MODEL :  {p.model || '无'}</p>
-                      <p className="text-sm text-gray-600">SKU :  {p.sku || '无'}   ·   {p.productType || '无'}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-center py-8">无相关产品</p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // 渲染产品列表
   const renderProductList = () => {
     if (loading) {
-      return (
-        <div className="flex flex-col justify-center items-center py-16">
-          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-600 mb-4"></div>
-          <p className="text-gray-600">加载产品数据中...</p>
-          <p className="text-sm text-gray-500 mt-2">请稍候</p>
-        </div>
-      );
+      return <CardGridSkeleton count={6} />;
     }
 
     if (error) {
-      return (
-        <div className="flex flex-col items-center justify-center py-16 text-red-500">
-          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-            <svg className="w-8 h-8 text-red-600" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <p className="text-red-700 mb-3">数据加载失败：{error}</p>
-          <button
-            onClick={() => fetchProducts(searchTerm)}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            重试
-          </button>
-        </div>
-      );
+      return <ErrorState message={error} onRetry={() => fetchProducts(searchTerm)} />;
     }
 
     if (products.length === 0) {
       return (
-        <div className="flex flex-col items-center justify-center py-16">
-          <svg className="w-16 h-16 text-gray-400 mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <h2 className="text-xl font-medium text-gray-700 mb-2">
-            {searchTerm ? '未找到相关产品' : '无数据'}
-          </h2>
-          <p className="text-gray-500 text-center max-w-md mb-6">
-            {searchTerm
-              ? `没有找到包含"${searchTerm}"的产品，请尝试其他关键词。`
-              : '当前库中没有任何产品信息'
-            }
-          </p>
-          {searchTerm && (
-            <button
-              onClick={clearSearch}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-            >
-              查看所有产品
-            </button>
-          )}
-        </div>
+        <EmptyState
+          title={searchTerm ? '未找到相关产品' : '暂无产品数据'}
+          description={
+            searchTerm
+              ? `没有找到包含 "${searchTerm}" 的产品，请尝试其他关键词。`
+              : '当前产品库中没有任何产品信息。'
+          }
+          actionLabel={searchTerm ? '查看所有产品' : undefined}
+          onAction={searchTerm ? clearSearch : undefined}
+        />
       );
     }
 
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {products.map((product) => {
+          const statusMeta = getStatusMeta(product.status);
+          const compatibleCount = product.compatibleIds?.length || 0;
+          const upgradeCount = product.upgradeIds?.length || 0;
+          const replacementCount = product.replacementIds?.length || 0;
+
           return (
-            <div
+            <article
               id={`product-${product.id}`}
               key={product.id}
-              className="bg-white rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-shadow duration-300 flex flex-col"
+              className="bg-white rounded-xl border border-slate-200 hover:border-slate-300 hover:shadow-md transition-all duration-200 flex flex-col overflow-hidden"
             >
-              {/* 上半部分：左右布局 */}
-              <div className="flex flex-col md:flex-row h-full">
-                {/* 左侧：图片 */}
-                <div className="w-full md:w-1/2 relative">
-                  <div className="h-64 md:h-full bg-gray-100 overflow-hidden">
-                    <ImageWithFallback
-                      src={formatImageUrl(product.image, BASE_URL)}
-                      alt={product.model || '无图片'}
-                      className="w-full h-full object-cover"
-                    />
-                    {/* SKU */}
-                    <div className="absolute top-2 left-2 px-2 py-1 bg-black/50 text-white text-xs rounded">
-                      {'SKU: '}{product.sku || '无'}
-                    </div>
-                    {/* TYPE */}
-                    <div className="absolute top-2 right-2 px-2 py-1 bg-black/50 text-white text-xs rounded">
-                      {product.productType || '类型: 无'}
-                    </div>
-
-                    {/* Brand */}
-                    <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/50 text-white text-xs rounded">
-                      For {product.brand || ''}
-                    </div>
-
-                    {/* status*/}
-                    <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/50 text-white text-xs rounded">
-                      {!product.status ? '无' : product.status === 'active' ? '在售' : product.status === 'discontinued' ? '停产' : '开发中'}
-                    </div>
-
-                  </div>
+              {/* 上半部分：正方形图片 + 关键信息 */}
+              <div className="flex flex-row border-b border-slate-100">
+                <div className="w-36 sm:w-40 aspect-square shrink-0 bg-slate-50 border-r border-slate-100 overflow-hidden">
+                  <MediaThumb
+                    src={formatMediaUrl(product.image, BASE_URL)}
+                    alt={product.model || '产品图片'}
+                    className="w-full h-full aspect-square object-cover"
+                  />
                 </div>
 
-                {/* 右侧：基本信息 */}
-                <div className="w-full md:w-1/2 p-4 md:p-6  ">
-                  {/* 第一行：ID */}
-               <div className="mb-4">
-                   <h1 className="text-1xl font-bold text-indigo-600">model :  {product.model || '无'}</h1>
-
-                   {/*
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="w-full">
-
-                        <span className="text-gray-600 break-words block mt-1">Model:{product.model || '无'}</span>
+                <div className="flex-1 min-w-0 p-3 sm:p-3.5 flex flex-col justify-between gap-2">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3
+                        className="text-[15px] font-semibold text-slate-900 truncate leading-snug"
+                        title={product.model || ''}
+                      >
+                        <span className="font-normal text-slate-400 mr-1">Model:</span>
+                        {product.model || '未命名型号'}
+                      </h3>
+                      <span className={`text-xs font-medium whitespace-nowrap shrink-0 ${statusMeta.className}`}>
+                        {statusMeta.label}
                       </span>
                     </div>
-                   */}
 
-
-                    {/* 品牌和状态 */}
-
-                   {/*
-                    <div className="flex flex-wrap gap-2 mb-2">
-                   <span className="px-3 py-1 bg-green-100 text-green-800 text-sm rounded-full whitespace-nowrap">
-                        品牌: {product.brand || '无'}
+                    <p className="text-xs text-slate-500 truncate">
+                      <span className="font-mono tabular-nums" title={product.sku || ''}>
+                        SKU: {product.sku || '—'}
                       </span>
+                      <span aria-hidden="true" className="mx-1.5 text-slate-300">·</span>
+                      <span>{product.productType || '无类型'}</span>
+                    </p>
+                  </div>
 
-                          <span className="px-3 py-1 bg-green-100 text-green-800 text-sm rounded-full whitespace-nowrap">Model:{product.model || '无'}</span>
-                     */}
-                     {/*
-                      <span className="px-3 py-1 bg-gray-100 text-gray-800 text-sm rounded-full whitespace-nowrap">
-                        状态: {!product.status ? '无' : product.status === 'active' ? '在售' : product.status === 'discontinued' ? '停产' : '开发中'}
+                  {/* 外链与说明书 */}
+                  <div className="flex items-center gap-3 text-xs">
+                    {product.httpLink ? (
+                      <a
+                        href={product.httpLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 font-medium whitespace-nowrap"
+                        title={product.httpLink}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                        产品链接
+                      </a>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-slate-300 whitespace-nowrap">
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                        无链接
                       </span>
+                    )}
 
-                   </div>  */}
-               </div>
-
-                  {/* 链接部分 */}
-                  <div className="space-y-3 mt-auto">
-                  <div className="flex flex-wrap gap-2 mb-2">
-                  {/*   <span className="px-3 py-1 bg-green-100 text-green-800 text-sm rounded-full whitespace-nowrap">
-                      品牌: {product.brand || '无'}
-                    </span>
-
-                        <span className="px-3 py-1 bg-green-100 text-green-800 text-sm rounded-full whitespace-nowrap">Model:{product.model || '无'}</span> */}
-
-                   {/*
-                    <span className="px-3 py-1 bg-gray-100 text-gray-800 text-sm rounded-full whitespace-nowrap">
-                      状态: {!product.status ? '无' : product.status === 'active' ? '在售' : product.status === 'discontinued' ? '停产' : '开发中'}
-                    </span>
-                    */}
-                  </div>
-                    <div className="flex flex-col space-y-2 mt-2">
-
-
-
-                      {/* 产品链接 */}
-                      <div>
-                        {product.httpLink ? (
-                          <a
-                            href={product.httpLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:text-blue-800 text-sm truncate flex items-center"
-                            title={product.httpLink}
-                          >
-                            <svg className="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            产品链接
-                          </a>
-                        ) : (
-                          <span className="text-gray-400 text-sm flex items-center">
-                            <svg className="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            产品链接: 无
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Manual 链接 */}
-                      <div>
-                        {product.manual ? (
-                          <a
-                            href={formatImageUrl(product.manual, BASE_URL)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:text-blue-800 text-sm truncate flex items-center"
-                          >
-                            <svg className="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            说明书
-                          </a>
-                        ) : (
-                          <span className="text-gray-400 text-sm flex items-center">
-                            <svg className="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            说明书: 无
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* 可匹配/可替换链接 */}
-                    <div className="flex flex-col space-y-2 mt-3 pt-3 border-t border-gray-100">
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (product.compatibleIds?.length > 0) {
-                            setSelectedProductForView(product);
-                            setShowApplicableModal(true);
-                          }
-                        }}
-                        disabled={!product.compatibleIds?.length}
-                        className={`text-sm flex items-center ${product.compatibleIds?.length ? 'text-green-600 hover:text-green-800' : 'text-gray-400 cursor-not-allowed'}`}
+                    {product.manual ? (
+                      <a
+                        href={formatMediaUrl(product.manual, BASE_URL)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 font-medium whitespace-nowrap"
                       >
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        可匹配 ({product.compatibleIds?.length || '无'})
-                      </button>
-
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (product.upgradeIds?.length > 0) {
-                            setSelectedProductForView(product);
-                            setShowUpgradeModal(true);
-                          }
-                        }}
-                        disabled={!product.upgradeIds?.length}
-                        className={`text-sm flex items-center ${product.upgradeIds?.length ? 'text-green-600 hover:text-green-800' : 'text-gray-400 cursor-not-allowed'}`}
-                      >
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        升级款 ({product.upgradeIds?.length || '无'})
-                      </button>
-
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (product.replacementIds?.length > 0) {
-                            setSelectedProductForView(product);
-                            setShowReplacementModal(true);
-                          }
-                        }}
-                        disabled={!product.replacementIds?.length}
-                        className={`text-sm flex items-center ${product.replacementIds?.length ? 'text-purple-600 hover:text-purple-800' : 'text-gray-400 cursor-not-allowed'}`}
-                      >
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        可替换 ({product.replacementIds?.length || '无'})
-                      </button>
-                    </div>
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        说明书
+                      </a>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-slate-300 whitespace-nowrap">
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        无说明书
+                      </span>
+                    )}
                   </div>
-                </div>
-              </div>
 
-              {/* 下部分：描述和操作按钮 */}
-              <div className="border-t border-gray-200 p-4 md:p-6 bg-white flex-1 flex flex-col">
-                <div className="mb-4 flex-1">
-                  <p className="text-gray-700 mb-2 font-medium">描述</p>
-                  <div className="line-clamp-3 text-gray-600 text-sm leading-relaxed">
-                    {product.description || '无'}
+                  {/* 关联快捷入口 */}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs tabular-nums">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (compatibleCount > 0) openRelationModal(product, 'compatible');
+                      }}
+                      disabled={compatibleCount === 0}
+                      className={`whitespace-nowrap transition-colors ${
+                        compatibleCount > 0
+                          ? 'text-emerald-700 hover:text-emerald-800 hover:underline font-medium'
+                          : 'text-slate-400 cursor-default'
+                      }`}
+                    >
+                      可匹配 {compatibleCount}
+                    </button>
+                    <span aria-hidden="true" className="text-slate-200">/</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (upgradeCount > 0) openRelationModal(product, 'upgrade');
+                      }}
+                      disabled={upgradeCount === 0}
+                      className={`whitespace-nowrap transition-colors ${
+                        upgradeCount > 0
+                          ? 'text-indigo-600 hover:text-indigo-800 hover:underline font-medium'
+                          : 'text-slate-400 cursor-default'
+                      }`}
+                    >
+                      升级款 {upgradeCount}
+                    </button>
+                    <span aria-hidden="true" className="text-slate-200">/</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (replacementCount > 0) openRelationModal(product, 'replacement');
+                      }}
+                      disabled={replacementCount === 0}
+                      className={`whitespace-nowrap transition-colors ${
+                        replacementCount > 0
+                          ? 'text-amber-700 hover:text-amber-800 hover:underline font-medium'
+                          : 'text-slate-400 cursor-default'
+                      }`}
+                    >
+                      可替代 {replacementCount}
+                    </button>
                   </div>
-                </div>
 
-                {/* 操作按钮 (仅保留详情) */}
-                <div className="flex justify-end space-x-3 pt-4 border-t border-gray-100">
-                  <button
-                    onClick={() => {
-                      setSelectedProduct(product);
-                      setShowDetailModal(true);
-                    }}
-                    className="px-4 py-2 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-lg hover:bg-indigo-100 transition-colors flex items-center text-sm font-medium w-full justify-center"
+                  {/* 完美替代 */}
+                  <p
+                    className="text-xs text-slate-600 truncate"
+                    title={`完美替代：${[product.brand, product.productfccId].filter(Boolean).join(' ') || '—'}`}
                   >
-                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    查看详情
-                  </button>
+                    <span className="text-slate-400">完美替代：</span>
+                    {product.brand || product.productfccId ? (
+                      <>
+                        {product.brand && (
+                          <span className="font-medium text-slate-700">{product.brand}</span>
+                        )}
+                        {product.brand && product.productfccId && ' '}
+                        {product.productfccId && (
+                          <span className="font-mono tabular-nums text-slate-700">
+                            {product.productfccId}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </p>
                 </div>
               </div>
-            </div>
+
+              {/* 中间：描述 */}
+              <div className="px-4 py-3 flex-1 bg-white">
+                <p className="text-xs font-medium text-slate-400 mb-1">描述</p>
+                <p
+                  className="text-sm text-slate-600 line-clamp-2 leading-relaxed min-h-[2.625rem]"
+                  title={product.description || ''}
+                >
+                  {product.description || '暂无描述'}
+                </p>
+              </div>
+
+              {/* 底部操作栏 */}
+              <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/70 mt-auto">
+                <button
+                  type="button"
+                  onClick={() => openDetailModal(product)}
+                  className="w-full inline-flex items-center justify-center gap-1.5 py-2 px-3 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/60 hover:text-indigo-700 transition-colors whitespace-nowrap"
+                >
+                  <Info className="w-4 h-4" />
+                  查看详情
+                </button>
+              </div>
+            </article>
           );
         })}
       </div>
     );
   };
 
+  const subtitleText = searchTerm && !loading
+    ? `搜索 "${searchTerm}" · 共 ${products.length} 个结果`
+    : loading
+      ? '正在同步产品目录...'
+      : `共 ${products.length} 个产品`;
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100">
-    {/* Header */}
-    <header className="bg-white shadow-sm sticky top-0 z-10">
-      <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-indigo-600">产品目录</h1>
+    <div>
+      <PageToolbar
+        title="产品目录"
+        subtitle={subtitleText}
+        searchTerm={searchTerm}
+        onSearchChange={handleSearchChange}
+        onClearSearch={clearSearch}
+        searchPlaceholder="输入 SKU、Model 或 FCC ID 搜索产品..."
+        searching={searching}
+        loading={loading}
+      />
 
-        <div className="relative w-full max-w-xl mx-8">
-          <div className="relative">
-          <input
+      {renderProductList()}
 
-              type="text"
-              placeholder="   输入SKU或Model搜索产品..."
-              value={searchTerm}
-              onChange={handleSearchChange}
-              className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+      {/* 关联产品模态框（含可匹配 / 升级款 / 可替代 Tab） */}
+      <ProductRelationModal
+        isOpen={relationModalState.isOpen}
+        onClose={closeRelationModal}
+        product={relationModalState.product}
+        initialTab={relationModalState.initialTab}
+        getRelatedProducts={getRelatedProducts}
+        baseUrl={BASE_URL}
+        onSelectProduct={(p, label) => openDetailModal(p, label)}
+      />
 
-              disabled={loading && !searching}
-            />
-
-
-            {searching && (
-              <div className="absolute right-3 top-2.5">
-                <div className="animate-spin h-4 w-4 border-t-2 border-b-2 border-indigo-600 rounded-full"></div>
-              </div>
-            )}
-            {searchTerm && !searching && (
-              <button
-                onClick={clearSearch}
-                className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
-                disabled={loading}
-              >
-                ✕
-              </button>
-            )}
-          </div>
-          {searching && (
-            <p className="text-xs text-gray-500 mt-1">正在搜索...</p>
-          )}
-        </div>
-
-
-      </div>
-    </header>
-
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
-        {/* 搜索统计信息 */}
-        {searchTerm && !loading && (
-          <div className="mb-6 text-sm text-gray-600">
-            搜索 "<span className="font-medium">{searchTerm}</span>" 的结果 ({products.length} 个)
-          </div>
-        )}
-
-        {renderProductList()}
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 py-6 mt-12">
-        <div className="container mx-auto px-4">
-          <div className="flex flex-col md:flex-row justify-between items-center">
-            <p className="text-gray-600">© {new Date().getFullYear()} 产品中心 | 所有产品信息来源于数据库</p>
-            <div className="mt-2 md:mt-0 text-sm text-gray-500">
-              {products.length > 0 && `当前显示 ${products.length} 个产品`}
-            </div>
-          </div>
-        </div>
-      </footer>
-
-      {/* 可匹配/可替换模态框 */}
-      {renderRelationModal(
-        showApplicableModal,
-        () => setShowApplicableModal(false),
-        '可匹配产品',
-        selectedProductForView?.compatibleIds
-          ? getRelatedProducts(selectedProductForView.compatibleIds)
-          : []
-      )}
-      {renderRelationModal(
-        showUpgradeModal,
-        () => setShowUpgradeModal(false),
-        '升级款产品',
-        selectedProductForView?.upgradeIds
-          ? getRelatedProducts(selectedProductForView.upgradeIds)
-          : []
-      )}
-      {renderRelationModal(
-        showReplacementModal,
-        () => setShowReplacementModal(false),
-        '可替换产品',
-        selectedProductForView?.replacementIds
-          ? getRelatedProducts(selectedProductForView.replacementIds)
-          : []
-      )}
-
-      {/* 🚀 产品详情模态框 (已应用新排版) */}
-      {showDetailModal && selectedProduct && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
-            <div className="px-6 py-4 border-b flex justify-between items-center bg-white">
-              <h2 className="text-xl font-bold text-gray-800">产品详情</h2>
-              <button onClick={() => setShowDetailModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">
-                &times;
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto flex-1 space-y-6 bg-gray-50/30">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-1">型号 (Model)</label>
-                  <p className="p-3 bg-gray-50 border border-gray-100 rounded-lg text-gray-900 break-words">{selectedProduct.model || '无'}</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-1">SKU</label>
-                  <p className="p-3 bg-gray-50 border border-gray-100 rounded-lg text-gray-900 font-mono break-all">{selectedProduct.sku || '无'}</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-1">产品参考自 (Brand)</label>
-                  <p className="p-3 bg-gray-50 border border-gray-100 rounded-lg text-gray-900">{selectedProduct.brand || '无'}</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-1">产品类型</label>
-                  <p className="p-3 bg-gray-50 border border-gray-100 rounded-lg text-gray-900">{selectedProduct.productType || '无'}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-1">状态</label>
-                  <p className="p-3 bg-gray-50 border border-gray-100 rounded-lg text-gray-900">
-                    {!selectedProduct.status ? '无' :
-                     selectedProduct.status === 'active' ? '在售' :
-                     selectedProduct.status === 'discontinued' ? '停产' : '开发中'}
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-500 mb-1">描述信息</label>
-                <p className="p-3 bg-gray-50 border border-gray-100 rounded-lg text-gray-900 min-h-[80px] whitespace-pre-wrap leading-relaxed">
-                  {selectedProduct.description || '无'}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-1">产品外链</label>
-                  <div className="p-3 bg-gray-50 border border-gray-100 rounded-lg truncate">
-                    {selectedProduct.httpLink ? (
-                      <a href={selectedProduct.httpLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                        {selectedProduct.httpLink}
-                      </a>
-                    ) : (
-                      <span className="text-gray-400">无</span>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-1">说明书 (PDF)</label>
-                  <div className="p-3 bg-gray-50 border border-gray-100 rounded-lg truncate">
-                    {selectedProduct.manual ? (
-                      <a href={formatImageUrl(selectedProduct.manual, BASE_URL)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center">
-                        查看 PDF 说明书
-                      </a>
-                    ) : (
-                      <span className="text-gray-400">无</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {/* 🚀 新增：产品关系模块 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-500 mb-2">关联产品</label>
-                <div className="p-4 bg-gray-50 border border-gray-100 rounded-lg flex flex-col gap-5">
-
-                  {/* 可匹配产品 */}
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">可匹配产品 (Compatible)</h4>
-                    {selectedProduct.compatibleIds?.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {getRelatedProducts(selectedProduct.compatibleIds).map(p => (
-                          <span key={p.id} className="px-3 py-1 bg-green-50 text-green-700 border border-green-200 text-sm rounded-md shadow-sm">
-                            {p.model}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-gray-400 text-sm">无</span>
-                    )}
-                  </div>
-
-                  {/* 升级款产品 */}
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">升级款产品 (Upgrade)</h4>
-                    {selectedProduct.upgradeIds?.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {getRelatedProducts(selectedProduct.upgradeIds).map(p => (
-                          <span key={p.id} className="px-3 py-1 bg-orange-50 text-orange-700 border border-orange-200 text-sm rounded-md shadow-sm">
-                            {p.model}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-gray-400 text-sm">无</span>
-                    )}
-                  </div>
-
-                  {/* 可替换产品 */}
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">可替换产品 (Replacement)</h4>
-                    {selectedProduct.replacementIds?.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {getRelatedProducts(selectedProduct.replacementIds).map(p => (
-                          <span key={p.id} className="px-3 py-1 bg-purple-50 text-purple-700 border border-purple-200 text-sm rounded-md shadow-sm">
-                            {p.model}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-gray-400 text-sm">无</span>
-                    )}
-                  </div>
-
-                </div>
-              </div>
-
-              {/* 产品图片 */}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-500 mb-2">产品图片</label>
-                <div className="p-4 bg-gray-50 border border-gray-100 rounded-lg flex justify-center items-center min-h-[200px]">
-                  {selectedProduct.image ? (
-                    <ImageWithFallback
-                      src={formatImageUrl(selectedProduct.image, BASE_URL)}
-                      alt={selectedProduct.model}
-                      className="max-w-full h-auto max-h-64 object-contain rounded-md shadow-sm border border-gray-200"
-                    />
-                  ) : (
-                    <span className="text-gray-400">无</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* 产品详情模态框 */}
+      {detailModalStack.map((entry, idx) => (
+        <ProductDetailModal
+          key={`${entry.product.id}-${idx}`}
+          product={entry.product}
+          relationLabel={entry.relationLabel}
+          depth={idx}
+          isTopmost={idx === detailModalStack.length - 1}
+          onClose={closeTopDetailModal}
+          getRelatedProducts={getRelatedProducts}
+          baseUrl={BASE_URL}
+        />
+      ))}
     </div>
   );
 }

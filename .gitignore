@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+react-demo/node_modules/
+
+# Environment variables (keep local DB passwords & JWT secrets out of Git)
+.env
+.env.local
+.env.*.local
+backend/.env
+react-demo/.env
+
+# Build outputs
+react-demo/build/
+dist/
+*.log
+.DS_Store

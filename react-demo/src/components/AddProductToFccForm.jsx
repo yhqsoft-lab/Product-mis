@@ -1,105 +1,100 @@
 // src/components/AddProductToFccForm.jsx
 import React, { useState } from 'react';
-import { safeFetch } from '../utils/safeFetch';
-
+import { Link2 } from 'lucide-react';
+import { fetchWithAuth } from '../utils/fetchWithAuth';
+import { showAppToast } from './CatalogUI';
 
 export default function AddProductToFccForm({
   fccId,
   onAdd,
-  availableProducts,     // 👈 由父组件传入
-  filteredAvailableProducts // 👈 由父组件计算好
+  filteredAvailableProducts = []
 }) {
   const [selectedProductId, setSelectedProductId] = useState('');
   const [associateLoading, setAssociateLoading] = useState(false);
   const [error, setError] = useState('');
-  // ✅ API 地址
-const API_URL = '';
+
   const handleAssociateProduct = async () => {
     if (!selectedProductId) {
-      alert('请选择要关联的产品');
+      setError('请先选择要关联的产品');
       return;
     }
 
     setAssociateLoading(true);
     setError('');
     try {
-      const response = await safeFetch(`${API_URL}/api/fccs/${fccId}/products`, {
+      const response = await fetchWithAuth(`/api/fccs/${fccId}/products`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productId: selectedProductId })
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         if (errorData.code === 'ALREADY_ASSOCIATED') {
-          alert('该产品已关联，不能重复添加');
+          setError('该产品已关联，不能重复添加');
         } else {
-          alert('关联失败: ' + errorData.message);
+          setError(errorData.message || '关联失败，请稍后重试');
         }
         return;
       }
 
-      // 成功后通知父组件刷新
       if (onAdd) onAdd();
       setSelectedProductId('');
-      alert('产品关联成功！');
-
+      showAppToast('产品关联成功', 'success');
     } catch (err) {
-      setError('关联失败，请稍后重试');
+      setError(err.message || '关联失败，请稍后重试');
     } finally {
       setAssociateLoading(false);
     }
   };
 
-  // 🖼️ 根据截图设计 UI —— 两栏布局，左侧关联，右侧已关联
   return (
-    <div className="mt-6 flex flex-col lg:flex-row gap-6">
-      {/* 左侧：关联新产品 */}
-      <div className="lg:w-1/2 bg-white p-4 rounded-lg shadow border border-gray-200">
-        <h3 className="text-lg font-bold mb-4 text-gray-800">关联新产品</h3>
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-900">关联新产品</h3>
+        <p className="text-xs text-slate-500 mt-0.5">
+          从现有产品库中选择并绑定到当前 FCC ID
+        </p>
+      </div>
 
-        {/* 错误提示区（如果存在） */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-            <p className="text-red-700">{error}</p>
-          </div>
-        )}
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 text-xs text-rose-700">
+          {error}
+        </div>
+      )}
 
-        {/* 产品选择下拉框 */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            选择产品：
-          </label>
-          <select
+      <div>
+        <label className="block text-xs font-medium text-slate-700 mb-1.5">
+          选择产品
+        </label>
+        <select
           value={selectedProductId}
-          onChange={(e) => setSelectedProductId(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md"
+          onChange={(e) => {
+            setSelectedProductId(e.target.value);
+            if (error) setError('');
+          }}
+          className="w-full h-10 px-3 text-sm text-slate-900 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
         >
           <option value="">-- 请选择产品 --</option>
           {filteredAvailableProducts.map((product) => (
             <option key={product.id} value={product.id}>
-              {product.model} - {product.brand}
+              {product.model} {product.sku ? `(${product.sku})` : ''} - {product.brand || '无品牌'}
             </option>
           ))}
         </select>
-        </div>
-
-
-        {/* 关联按钮 */}
-        <button
-          onClick={handleAssociateProduct}
-          disabled={!selectedProductId || associateLoading}
-          className={`w-full px-4 py-2 rounded-md font-medium transition-colors ${
-            selectedProductId && !associateLoading
-              ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          }`}
-        >
-          {associateLoading ? '关联中...' : '关联产品'}
-        </button>
+        {filteredAvailableProducts.length === 0 && (
+          <p className="text-xs text-slate-400 mt-1.5">暂无更多可关联的产品</p>
+        )}
       </div>
 
-
+      <button
+        type="button"
+        onClick={handleAssociateProduct}
+        disabled={!selectedProductId || associateLoading}
+        className="w-full inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed whitespace-nowrap"
+      >
+        <Link2 className="w-4 h-4" />
+        {associateLoading ? '关联中...' : '关联产品'}
+      </button>
     </div>
   );
 }

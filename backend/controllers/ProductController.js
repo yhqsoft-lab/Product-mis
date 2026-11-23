@@ -14,10 +14,8 @@ exports.getProducts = async (req, res) => {
     if (search) {
       where[Op.or] = [
         { model: { [Op.like]: `%${search}%` } },
-  //      { productType: { [Op.like]: `%${search}%` } },
         { sku: { [Op.like]: `%${search}%` } },
-  //      { brand: { [Op.like]: `%${search}%` } },
-  //      { description: { [Op.like]: `%${search}%` } }
+        { productfccId: { [Op.like]: `%${search}%` } },
       ];
     }
 
@@ -64,53 +62,91 @@ exports.getProducts = async (req, res) => {
   }
 };
 
+const ALLOWED_STATUSES = ['active', 'discontinued', 'development', 'clearance'];
+
+const cleanupUploadedFiles = async (files) => {
+  if (!files) return;
+  const targets = [
+    ...(files.image || []),
+    ...(files.manual || [])
+  ];
+  await Promise.all(
+    targets.map(async (f) => {
+      if (f?.path) {
+        try {
+          await fs.unlink(f.path);
+        } catch (_) {
+          // 忽略已删除或不存在的文件
+        }
+      }
+    })
+  );
+};
+
 // 创建新产品
 exports.createProduct = async (req, res) => {
   try {
-    const {
-     sku,
-     model,
-     description = '',
-     brand = '',
-     productType = '',
-     httpLink = '',
-     status = 'active'
-   } = req.body;
+    const sku = String(req.body.sku || '').trim();
+    const model = String(req.body.model || '').trim();
+    const description = String(req.body.description || '').trim();
+    const brand = String(req.body.brand || '').trim();
+    const productfccId = String(req.body.productfccId ?? req.body.fccId ?? '').trim();
+    const productType = String(req.body.productType || '').trim();
+    const httpLink = String(req.body.httpLink || '').trim();
+    const status = req.body.status !== undefined && req.body.status !== ''
+      ? String(req.body.status).trim()
+      : 'active';
 
-       // 🔍 检查 SKU 是否已存在
-       const existingSku = await Product.findOne({ where: { sku } });
-       if (existingSku) {
-         return res.status(400).json({
-           success: false,
-           message: 'SKU 已存在，请使用其他 SKU'
-         });
-       }
+    if (!sku) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'SKU 不能为空' });
+    }
+    if (!model) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: '型号（Model）不能为空' });
+    }
+    if (!brand) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: '完美替代品牌不能为空' });
+    }
+    if (!productfccId) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: '完美替代型号（FCC ID）不能为空' });
+    }
+    if (!ALLOWED_STATUSES.includes(status)) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: '无效的产品销售状态' });
+    }
 
-       // 🔍 检查 Model 是否已存在
-       const existingModel = await Product.findOne({ where: { model } });
-       if (existingModel) {
-         return res.status(400).json({
-           success: false,
-           message: '型号（Model）已存在，请使用其他型号'
-         });
-       }
+    // 检查 SKU 是否已存在
+    const existingSku = await Product.findOne({ where: { sku } });
+    if (existingSku) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({
+        success: false,
+        message: 'SKU 已存在，请使用其他 SKU'
+      });
+    }
+
+    // 检查 Model 是否已存在
+    const existingModel = await Product.findOne({ where: { model } });
+    if (existingModel) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({
+        success: false,
+        message: '型号（Model）已存在，请使用其他型号'
+      });
+    }
 
     let imagePath = null;
     let manualPath = null;
 
-    // ✅ 修改：使用 upload.fields() 后，req.files 是一个对象
     if (req.files) {
-      // 处理图片文件
       if (req.files.image && req.files.image[0]) {
-        const imageFile = req.files.image[0];
-        // 文件已经由 multer 保存，只需要获取路径
-        imagePath = `/uploads/${imageFile.filename}`;
+        imagePath = `/uploads/${req.files.image[0].filename}`;
       }
-
-      // 处理 PDF 文件
       if (req.files.manual && req.files.manual[0]) {
-        const manualFile = req.files.manual[0];
-        manualPath = `/uploads/${manualFile.filename}`;
+        manualPath = `/uploads/${req.files.manual[0].filename}`;
       }
     }
 
@@ -119,6 +155,7 @@ exports.createProduct = async (req, res) => {
       model,
       description,
       brand,
+      productfccId,
       productType,
       httpLink,
       status,
@@ -126,8 +163,15 @@ exports.createProduct = async (req, res) => {
       image: imagePath
     });
 
-    res.status(201).json(newProduct);
+    const plain = newProduct.toJSON ? newProduct.toJSON() : newProduct;
+    res.status(201).json({
+      ...plain,
+      compatibleIds: [],
+      upgradeIds: [],
+      replacementIds: []
+    });
   } catch (err) {
+    await cleanupUploadedFiles(req.files);
     console.error('创建产品失败:', err.message);
     res.status(400).json({ message: err.message });
   }
@@ -138,73 +182,94 @@ exports.updateProduct = async (req, res) => {
   try {
     const product = await Product.findByPk(req.params.id);
     if (!product) {
+      await cleanupUploadedFiles(req.files);
       return res.status(404).json({ message: '未找到该产品' });
     }
 
     const { id } = req.params;
-    const {
-      sku,
-      model,
-      description = '',
-      brand = '',
-      productType = '',
-      httpLink = ''
-    } = req.body;
+    const sku = req.body.sku !== undefined ? String(req.body.sku).trim() : product.sku;
+    const model = req.body.model !== undefined ? String(req.body.model).trim() : product.model;
+    const description = req.body.description !== undefined ? String(req.body.description).trim() : product.description;
+    const brand = req.body.brand !== undefined ? String(req.body.brand).trim() : product.brand;
+    const rawFccId = req.body.productfccId !== undefined ? req.body.productfccId : req.body.fccId;
+    const productfccId = rawFccId !== undefined ? String(rawFccId).trim() : (product.productfccId || '');
+    const productType = req.body.productType !== undefined ? String(req.body.productType).trim() : product.productType;
+    const httpLink = req.body.httpLink !== undefined ? String(req.body.httpLink).trim() : product.httpLink;
 
-    // 安全处理 status 字段
-    const statusValue = req.body.status !== undefined ? req.body.status : 'active';
+    // 校验并保留原有 status，避免未传时被误重置为 active
+    const statusValue =
+      req.body.status !== undefined && req.body.status !== ''
+        ? String(req.body.status).trim()
+        : product.status || 'active';
 
-    // 🔍 检查 SKU（排除自身）
-    if (sku !== undefined && sku !== '') {
-      const existingSku = await Product.findOne({
-        where: {
-          sku,
-          id: { [Op.ne]: id }
-        }
-      });
-      if (existingSku) {
-        return res.status(400).json({
-          success: false,
-          message: 'SKU 已存在，请使用其他 SKU'
-        });
-      }
+    if (!sku) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'SKU 不能为空' });
+    }
+    if (!model) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: '型号（Model）不能为空' });
+    }
+    if (!brand) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: '完美替代品牌不能为空' });
+    }
+    if (!productfccId) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: '完美替代型号（FCC ID）不能为空' });
+    }
+    if (!ALLOWED_STATUSES.includes(statusValue)) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: '无效的产品销售状态' });
     }
 
-    // 🔍 检查 Model（排除自身）
-    if (model !== undefined && model !== '') {
-      const existingModel = await Product.findOne({
-        where: {
-          model,
-          id: { [Op.ne]: id }
-        }
-      });
-      if (existingModel) {
-        return res.status(400).json({
-          success: false,
-          message: '型号（Model）已存在，请使用其他型号'
-        });
+    // 检查 SKU（排除自身）
+    const existingSku = await Product.findOne({
+      where: {
+        sku,
+        id: { [Op.ne]: id }
       }
+    });
+    if (existingSku) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({
+        success: false,
+        message: 'SKU 已存在，请使用其他 SKU'
+      });
     }
 
-    // 👇 关键：动态处理文件路径
+    // 检查 Model（排除自身）
+    const existingModel = await Product.findOne({
+      where: {
+        model,
+        id: { [Op.ne]: id }
+      }
+    });
+    if (existingModel) {
+      await cleanupUploadedFiles(req.files);
+      return res.status(400).json({
+        success: false,
+        message: '型号（Model）已存在，请使用其他型号'
+      });
+    }
+
+    // 动态处理文件路径（支持 JSON 传 null 以及 FormData 传 removeImage/removeManual）
     let imagePath = product.image;
     let manualPath = product.manual;
 
-    // 处理图片
     if (req.files?.image?.[0]) {
       imagePath = `/uploads/${req.files.image[0].filename}`;
-    } else if (req.body.image !== undefined && req.body.image === null) {
+    } else if (req.body.image === null || req.body.removeImage === 'true') {
       imagePath = null;
     }
 
-    // 处理说明书
     if (req.files?.manual?.[0]) {
       manualPath = `/uploads/${req.files.manual[0].filename}`;
-    } else if (req.body.manual !== undefined && req.body.manual === null) {
+    } else if (req.body.manual === null || req.body.removeManual === 'true') {
       manualPath = null;
     }
 
-    // 👇 安全删除旧文件
+    // 安全删除旧文件
     const isValidPath = (p) =>
       p && p.startsWith('/uploads/') && !p.includes('..');
 
@@ -219,12 +284,12 @@ exports.updateProduct = async (req, res) => {
       console.warn('删除旧文件失败:', err.message);
     }
 
-    // 执行更新
     await product.update({
       sku,
       model,
       description,
       brand,
+      productfccId,
       productType,
       httpLink,
       status: statusValue,
@@ -234,6 +299,7 @@ exports.updateProduct = async (req, res) => {
 
     res.json(product);
   } catch (err) {
+    await cleanupUploadedFiles(req.files);
     console.error('更新产品失败:', err);
     res.status(500).json({ message: err.message || '服务器内部错误' });
   }
@@ -300,49 +366,68 @@ exports.getProductRelations = async (req, res) => {
 };
 // 设置产品关系（全量替换）
 exports.setProductRelations = async (req, res) => {
-  const { id } = req.params;
-  const { compatible = [], upgrade = [], replacement = [] } = req.body;
+  const sourceId = Number(req.params.id);
+  if (!Number.isInteger(sourceId) || sourceId <= 0) {
+    return res.status(400).json({ message: '无效的产品 ID' });
+  }
+
+  const { compatible = [], upgrade = [], replacement = [] } = req.body || {};
+
+  if (!Array.isArray(compatible) || !Array.isArray(upgrade) || !Array.isArray(replacement)) {
+    return res.status(400).json({ message: '关系列表格式不正确，必须为数组' });
+  }
+
+  const normalizeIds = (list) => {
+    const parsed = [];
+    for (const pid of list) {
+      const num = Number(pid);
+      if (!Number.isInteger(num) || num <= 0) {
+        return null;
+      }
+      parsed.push(num);
+    }
+    return parsed;
+  };
+
+  const compatibleIds = normalizeIds(compatible);
+  const upgradeIds = normalizeIds(upgrade);
+  const replacementIds = normalizeIds(replacement);
+
+  if (!compatibleIds || !upgradeIds || !replacementIds) {
+    return res.status(400).json({ message: '无效的产品ID' });
+  }
 
   try {
-    const product = await Product.findByPk(id);
+    const product = await Product.findByPk(sourceId);
     if (!product) {
       return res.status(404).json({ message: '产品不存在' });
     }
 
-    const allIds = [...compatible, ...upgrade, ...replacement];
-    if (allIds.some(pid => {
-      const num = Number(pid);
-      return isNaN(num) || !Number.isInteger(num) || num <= 0;
-    })) {
-      return res.status(400).json({ message: '无效的产品ID' });
-    }
+    // 去重并排除自身，确保同一目标产品只关联一种关系类型
+    const seenTargets = new Set([sourceId]);
+    const relations = [];
+
+    const appendRelations = (ids, type) => {
+      for (const targetId of ids) {
+        if (!seenTargets.has(targetId)) {
+          seenTargets.add(targetId);
+          relations.push([sourceId, targetId, type]);
+        }
+      }
+    };
+
+    appendRelations(compatibleIds, 'compatible');
+    appendRelations(upgradeIds, 'upgrade');
+    appendRelations(replacementIds, 'replacement');
 
     await sequelize.transaction(async (t) => {
       await sequelize.query(
         `DELETE FROM product_relations
          WHERE source_product_id = ?
          AND relation_type IN ('compatible','upgrade', 'replacement')`,
-        { replacements: [id], transaction: t }
+        { replacements: [sourceId], transaction: t }
       );
 
-      const relations = [];
-      for (const targetId of compatible) {
-        if (targetId !== Number(id)) {
-          relations.push([id, targetId, 'compatible']);
-        }
-      }
-      for (const targetId of upgrade) {
-        if (targetId !== Number(id)) {
-          relations.push([id, targetId, 'upgrade']);
-        }
-      }
-      for (const targetId of replacement) {
-        if (targetId !== Number(id)) {
-          relations.push([id, targetId, 'replacement']);
-        }
-      }
-
-      // ✅ 修复 SQL 语法
       if (relations.length > 0) {
         const placeholders = relations.map(() => '(?, ?, ?)').join(', ');
         const flatValues = relations.flat();

@@ -17,6 +17,7 @@ import FccManagement from './pages/FccManagement';
 import ProductManagement from './pages/ProductManagement';
 import ProductCatalog from './pages/ProductCatalog';
 import ProductView from './pages/ProductView';
+import FccView from './pages/FccView';
 import IdleWarningDialog from './components/IdleWarningDialog';
 
 // 🔍 自动登出监听器
@@ -24,7 +25,7 @@ const AutoLogoutWatcher = () => {
   const { user, loading } = useUser();
   const navigate = useNavigate();
   const location = useLocation();
-  const publicRoutes = ['/login', '/productview', '/productcatalog'];
+  const publicRoutes = ['/login', '/productview', '/fccview', '/productcatalog'];
 
   useEffect(() => {
     if (!loading && !user && !publicRoutes.includes(location.pathname)) {
@@ -68,6 +69,7 @@ const AppRoutes = () => {
         <Route element={<AppLayout />}>
           <Route path="/productcatalog" element={<ProductCatalog />} />
           <Route path="/productview" element={<ProductView />} />
+          <Route path="/fccview" element={<FccView />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/fccs" element={<FccManagement />} />
             <Route path="/products" element={<ProductManagement />} />

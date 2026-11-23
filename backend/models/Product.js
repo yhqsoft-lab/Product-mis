@@ -13,6 +13,10 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: true
     },
+    productfccId: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     model: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -34,7 +38,7 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true
     },
     status: {
-     type: DataTypes.ENUM('active', 'discontinued', 'development'),
+     type: DataTypes.ENUM('active', 'discontinued', 'development', 'clearance'),
      allowNull: false,
      defaultValue: 'active'
    },

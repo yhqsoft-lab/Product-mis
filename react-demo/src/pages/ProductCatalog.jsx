@@ -2,9 +2,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { safeFetch } from '../utils/safeFetch';
+import { useFooterRight } from '../components/DashboardLayout';
 
 export default function ProductCatalog() {
   const [products, setProducts] = useState([]);
+  useFooterRight(products.length > 0 ? `当前显示 ${products.length} 个产品` : '');
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -60,7 +62,7 @@ export default function ProductCatalog() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-10">
         <div className="container mx-auto px-4 py-5">
@@ -264,12 +266,6 @@ export default function ProductCatalog() {
           </div>
         )}
       </main>
-
-      <footer className="bg-white border-t py-5">
-        <div className="container mx-auto px-4 text-center text-gray-600 text-sm">
-          <p>© 2025 产品中心 | 所有产品信息来源于数据库</p>
-        </div>
-      </footer>
     </div>
   );
 }

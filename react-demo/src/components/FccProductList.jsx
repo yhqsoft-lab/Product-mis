@@ -1,87 +1,90 @@
 import React from 'react';
+import { Trash2, Package } from 'lucide-react';
 
 export default function FccProductList({ products, loading, error, onRemove }) {
-  // ✅ 绝对安全的数组处理 - 双重保障
   const safeProducts = Array.isArray(products) ? products : [];
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-16">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600"></div>
-        <span className="ml-3 text-gray-600">加载中...</span>
+      <div className="flex justify-center items-center py-12">
+        <div className="animate-spin rounded-full h-7 w-7 border-2 border-indigo-600 border-t-transparent" />
+        <span className="ml-3 text-sm text-slate-500">加载关联产品中...</span>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-red-500">
-        <p>数据加载失败：{error}</p>
-        <button
-          onClick={() => window.location.reload()}
-          className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-        >
-          重试
-        </button>
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <p className="text-sm text-rose-600">数据加载失败：{error}</p>
       </div>
     );
   }
 
   if (safeProducts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16">
-        <svg className="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-        <h2 className="text-xl font-medium text-gray-800 mb-2">没有关联产品</h2>
-        <p className="text-gray-500 text-center max-w-md">
-          当前 FCC 暂未关联任何产品
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
+          <Package className="w-5 h-5" />
+        </div>
+        <h3 className="text-sm font-semibold text-slate-800 mb-1">暂无关联产品</h3>
+        <p className="text-xs text-slate-500">
+          请在左侧选择产品并点击“关联产品”进行绑定
         </p>
       </div>
     );
   }
 
   return (
-    <div className="mt-6">
-      <h3 className="text-lg font-bold mb-4 text-gray-800">已关联产品</h3>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">
-          <thead className="bg-gray-50">
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-slate-900">
+          已关联产品
+          <span className="ml-2 text-xs font-normal text-slate-500 tabular-nums">
+            共 {safeProducts.length} 个
+          </span>
+        </h3>
+      </div>
+      <div className="overflow-x-auto border border-slate-200 rounded-lg">
+        <table className="w-full min-w-full divide-y divide-slate-200">
+          <thead className="bg-slate-50">
             <tr>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th scope="col" className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">
                 产品型号
               </th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th scope="col" className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">
                 品牌
               </th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th scope="col" className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">
                 描述
               </th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th scope="col" className="px-4 py-2.5 text-right text-xs font-medium text-slate-500">
                 操作
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="bg-white divide-y divide-slate-100">
             {safeProducts.map((product) => (
-              <tr key={product.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+              <tr key={product.id} className="hover:bg-slate-50/70 transition-colors">
+                <td className="px-4 py-2.5 whitespace-nowrap text-sm font-medium text-slate-900">
                   {product.model}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                  {product.brand}
+                <td className="px-4 py-2.5 whitespace-nowrap text-sm text-slate-600">
+                  {product.brand || '—'}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-600 max-w-xs">
+                <td className="px-4 py-2.5 text-xs text-slate-500 max-w-xs">
                   <div className="line-clamp-2">
-                    {product.description || '-'}
+                    {product.description || '—'}
                   </div>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm">
+                <td className="px-4 py-2.5 whitespace-nowrap text-right">
                   <button
+                    type="button"
                     onClick={() => onRemove(product.id)}
-                    className="px-3 py-1 text-xs font-medium text-red-600 bg-red-100 rounded-md hover:bg-red-200 transition-colors"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-rose-600 bg-white border border-rose-200 rounded-md hover:bg-rose-50 transition-colors whitespace-nowrap"
                   >
-                    删除
+                    <Trash2 className="w-3 h-3" />
+                    移除
                   </button>
                 </td>
               </tr>

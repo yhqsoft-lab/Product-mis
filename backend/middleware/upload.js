@@ -25,14 +25,27 @@ const storage = multer.diskStorage({
   }
 });
 
+const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype === 'application/pdf') {
-    cb(null, true); // PDF 走 manual 逻辑
-  } else if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.mimetype)) {
-    cb(null, true); // 图片走 image 逻辑
-  } else {
-    cb(new Error('仅允许上传 PDF 或图片文件 (JPEG, PNG, GIF, WebP)'), false);
+  if (file.fieldname === 'manual') {
+    if (file.mimetype === 'application/pdf') {
+      return cb(null, true);
+    }
+    return cb(new Error('说明书仅允许上传 PDF 文件'), false);
   }
+
+  if (file.fieldname === 'image') {
+    if (ALLOWED_IMAGE_MIMES.includes(file.mimetype)) {
+      return cb(null, true);
+    }
+    return cb(new Error('产品图片仅允许上传 JPEG、PNG、GIF 或 WebP 格式'), false);
+  }
+
+  if (file.mimetype === 'application/pdf' || ALLOWED_IMAGE_MIMES.includes(file.mimetype)) {
+    return cb(null, true);
+  }
+  return cb(new Error('仅允许上传 PDF 或图片文件 (JPEG, PNG, GIF, WebP)'), false);
 };
 
 const upload = multer({

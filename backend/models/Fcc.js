@@ -1,8 +1,4 @@
-
-// models/Fcc.model.js
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/db');
-
+// models/Fcc.js
 module.exports = (sequelize, DataTypes) => {
 const Fcc = sequelize.define('Fcc', {
   name: {

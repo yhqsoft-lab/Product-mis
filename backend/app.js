@@ -1,4 +1,15 @@
 // backend/app.js
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
+
+// ✅ 最先加载环境变量（兼容从根目录或 backend 目录启动）
+const rootEnvPath = path.resolve(__dirname, '../.env');
+const backendEnvPath = path.resolve(__dirname, '.env');
+if (fs.existsSync(rootEnvPath)) dotenv.config({ path: rootEnvPath });
+if (fs.existsSync(backendEnvPath)) dotenv.config({ path: backendEnvPath });
+dotenv.config();
+
 const express = require('express');
 const app = express();
 app.set('trust proxy', 1);
@@ -6,8 +17,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
 
 // ✅ 从 models/index.js 导入数据库连接
 const { sequelize } = require('./models');
@@ -16,9 +25,6 @@ const { sequelize } = require('./models');
 const FccRoutes = require('./routes/FccRoutes');
 const ProductRoutes = require('./routes/ProductRoutes');
 const LoginRoutes = require('./routes/authRoutes');
-
-// ✅ 加载环境变量
-require('dotenv').config();
 
 // ✅ 安全中间件（注意顺序！）
 app.use(morgan('dev'));
@@ -192,8 +198,8 @@ const startServer = async () => {
     console.warn('⚠️ 数据库初始化警告，继续启动服务:', error.message);
   }
 
-  const PORT = 3000;
-  const HOST = '0.0.0.0';
+  const PORT = Number(process.env.BACKEND_PORT || process.env.DEFAULT_APP_PORT) || 3000;
+  const HOST = process.env.HOST || '0.0.0.0';
   const server = app.listen(PORT, HOST, () => {
     console.log(`🚀 服务运行在 http://${HOST}:${PORT}`);
     console.log(`📁 静态文件目录: ${path.join(__dirname, 'public/uploads')}`);

@@ -1,22 +1,44 @@
-// src/pages/ProductManagement.jsx
+// src/pages/ProductManagement.js
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-// ✅ 修复 1：正确导入 useUser（路径与实际文件一致）
+import {
+  Plus,
+  ExternalLink,
+  FileText,
+  Eye,
+  Link2,
+  Pencil,
+  Trash2,
+  X,
+  Upload,
+  Check
+} from 'lucide-react';
 import { useUser } from '../context/useUser';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ProductRelationsManager from '../components/ProductRelationsManager';
 import { fetchWithAuth } from '../utils/fetchWithAuth';
 import { safeFetch } from '../utils/safeFetch';
+import { useFooterRight } from '../components/DashboardLayout';
+import {
+  formatMediaUrl,
+  getStatusMeta,
+  MediaThumb,
+  PageToolbar,
+  CardGridSkeleton,
+  EmptyState,
+  ErrorState,
+  showAppToast,
+  ProductDetailModal,
+  ProductRelationModal
+} from '../components/CatalogUI';
 
 export default function ProductManagement() {
-  // ✅ 修复 2：正确解构 token（独立字段，不是 user.token）
   const { user, token, loading: isUserLoading } = useUser();
   const navigate = useNavigate();
 
-  // 🔐 权限校验：等待加载完成 + 检查认证状态
+  // 权限校验
   useEffect(() => {
     if (isUserLoading) return;
-    // ✅ 同时检查 user 和 token，避免误判
     if (!user && !token) {
       navigate('/login', { replace: true });
     }
@@ -24,6 +46,7 @@ export default function ProductManagement() {
 
   // 页面状态
   const [products, setProducts] = useState([]);
+  useFooterRight(products.length > 0 ? `当前显示 ${products.length} 个产品` : '');
   const [allProducts, setAllProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
@@ -37,10 +60,23 @@ export default function ProductManagement() {
   // Relations 状态
   const [showRelationsModal, setShowRelationsModal] = useState(false);
   const [selectedProductForRelations, setSelectedProductForRelations] = useState(null);
-  const [showApplicableModal, setShowApplicableModal] = useState(false);
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [showReplacementModal, setShowReplacementModal] = useState(false);
-  const [selectedProductForView, setSelectedProductForView] = useState(null);
+  const [relationModalState, setRelationModalState] = useState({
+    isOpen: false,
+    product: null,
+    initialTab: 'compatible'
+  });
+
+  const openRelationModal = useCallback((product, tab = 'compatible') => {
+    setRelationModalState({
+      isOpen: true,
+      product,
+      initialTab: tab
+    });
+  }, []);
+
+  const closeRelationModal = useCallback(() => {
+    setRelationModalState((prev) => ({ ...prev, isOpen: false }));
+  }, []);
 
   // 文件状态
   const [imageFile, setImageFile] = useState(null);
@@ -50,13 +86,22 @@ export default function ProductManagement() {
   // 防止重复提交
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 唯一性校验
-  const [skuError, setSkuError] = useState('');
-  const [modelError, setModelError] = useState('');
+  // 详情模态框堆栈（支持点击关联产品弹出新详情弹窗）
+  const [detailModalStack, setDetailModalStack] = useState([]);
 
-  // 模态框状态
-  const [showDetailModal, setShowDetailModal] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
+  const openDetailModal = useCallback((product, relationLabel = '') => {
+    if (!product) return;
+    setDetailModalStack((prev) => {
+      if (prev.length > 0 && prev[prev.length - 1].product?.id === product.id) {
+        return prev;
+      }
+      return [...prev, { product, relationLabel }];
+    });
+  }, []);
+
+  const closeTopDetailModal = useCallback(() => {
+    setDetailModalStack((prev) => prev.slice(0, -1));
+  }, []);
 
   // 表单状态
   const [newProduct, setNewProduct] = useState({
@@ -64,52 +109,59 @@ export default function ProductManagement() {
     productType: '',
     description: '',
     brand: '',
+    productfccId: '',
     model: '',
     httpLink: '',
+    status: 'active',
     manual: ''
   });
 
-  // 错误信息
   const [formErrors, setFormErrors] = useState({});
+  const [customFields, setCustomFields] = useState({
+    brand: false,
+    productType: false
+  });
 
-  // API 配置（仅当配置了完整 http(s) 地址时使用，否则使用同源相对路径）
   const rawApiBase = process.env.REACT_APP_API_BASE || '';
   const BASE_URL = /^https?:\/\//i.test(rawApiBase) ? rawApiBase.replace(/\/+$/, '') : '';
   const API_PRODUCTS = `${BASE_URL}/api/products`;
 
-  // 品牌选项
   const BRAND_OPTIONS = [
     { value: '', label: '请选择品牌' },
     { value: 'Hunter', label: 'Hunter' },
     { value: 'Harbor Breeze', label: 'Harbor Breeze' },
     { value: 'Hampton Bay', label: 'Hampton Bay' },
     { value: 'CoreBay', label: 'CoreBay' },
-    { value: 'Others', label: '其他' }
+    { value: 'Others', label: '其他 (自定义)' }
   ];
 
-  // 产品类型选项
   const PRODUCT_TYPE_OPTIONS = [
     { value: '', label: '请选择产品类型' },
     { value: 'Ceiling Fan', label: 'Ceiling Fan' },
     { value: 'Control Kit', label: 'Control Kit' },
     { value: 'Remote', label: 'Remote' },
     { value: 'Receiver', label: 'Receiver' },
-    { value: 'Others', label: '其他' }
+    { value: 'Others', label: '其他 (自定义)' }
   ];
 
-  // 获取所有产品（用于 relations 下拉选项）
+  const STATUS_OPTIONS = [
+    { value: 'active', label: '在售' },
+    { value: 'clearance', label: '清仓' },
+    { value: 'development', label: '开发中' },
+    { value: 'discontinued', label: '停产' }
+  ];
+
   const fetchAllProducts = useCallback(async () => {
     try {
       const res = await fetchWithAuth(API_PRODUCTS);
       if (!res.ok) throw new Error('获取产品列表失败');
       const data = await res.json();
-      setAllProducts(data);
+      setAllProducts(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('获取所有产品失败:', err);
     }
   }, [API_PRODUCTS]);
 
-  // 获取产品数据（带搜索）
   const fetchProducts = useCallback(async (search = '') => {
     setLoading(true);
     setError(null);
@@ -123,7 +175,7 @@ export default function ProductManagement() {
         throw new Error(errorData.message || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      setProducts(data);
+      setProducts(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('❌ 获取产品失败:', err);
       setError(err.message);
@@ -134,21 +186,20 @@ export default function ProductManagement() {
     }
   }, [API_PRODUCTS]);
 
-  // 初始化加载全量产品
   useEffect(() => {
     if (isUserLoading || (!user && !token)) return;
     fetchAllProducts();
   }, [fetchAllProducts, isUserLoading, user, token]);
 
-  // 防抖校验函数
   const checkUniqueField = useCallback(async (field, value, productId = null) => {
     if (!value) return '';
     try {
       const params = new URLSearchParams({ [field]: value });
       if (productId) params.append('excludeId', productId);
       const res = await fetchWithAuth(`/api/products/check-unique?${params}`);
+      if (!res.ok) return '';
       const data = await res.json();
-      if (!data.unique) {
+      if (data && data.unique === false) {
         return field === 'sku' ? 'SKU 已存在' : '型号已存在';
       }
     } catch (err) {
@@ -157,7 +208,6 @@ export default function ProductManagement() {
     return '';
   }, []);
 
-  // 防抖搜索
   useEffect(() => {
     if (isUserLoading || (!user && !token)) return;
     if (searchTerm.trim() === '') {
@@ -167,7 +217,7 @@ export default function ProductManagement() {
     setSearching(true);
     const timer = setTimeout(() => {
       fetchProducts(searchTerm);
-    }, 500);
+    }, 450);
     return () => clearTimeout(timer);
   }, [searchTerm, fetchProducts, isUserLoading, user, token]);
 
@@ -179,21 +229,20 @@ export default function ProductManagement() {
 
   const clearSearch = () => {
     setSearchTerm('');
-    fetchProducts();
+    setSearching(false);
   };
 
-  // 图片选择处理
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
-      alert('请上传 JPG、PNG、GIF 或 WebP 格式的图片');
+      showAppToast('请上传 JPG、PNG、GIF 或 WebP 格式的图片', 'error');
       e.target.value = '';
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      alert('图片不能超过 5MB');
+      showAppToast('图片不能超过 5MB', 'error');
       e.target.value = '';
       return;
     }
@@ -203,24 +252,23 @@ export default function ProductManagement() {
       if (event.target?.result) setPreview(event.target.result);
     };
     reader.onerror = () => {
-      alert('图片读取失败');
+      showAppToast('图片读取失败', 'error');
       setImageFile(null);
       setPreview('');
     };
     reader.readAsDataURL(file);
   };
 
-  // PDF 选择处理
   const handlePdfChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.type !== 'application/pdf') {
-      alert('请上传 PDF 文件');
+      showAppToast('请上传 PDF 文件', 'error');
       e.target.value = '';
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      alert('PDF 文件不能超过 5MB');
+      showAppToast('PDF 文件不能超过 5MB', 'error');
       e.target.value = '';
       return;
     }
@@ -237,8 +285,8 @@ export default function ProductManagement() {
     setSelectedProductForRelations(null);
   };
 
-  const toggleModal = () => {
-    setShowModal(!showModal);
+  const toggleModal = useCallback(() => {
+    setShowModal((prev) => !prev);
     setEditingProduct(null);
     setFormErrors({});
     setNewProduct({
@@ -246,19 +294,59 @@ export default function ProductManagement() {
       productType: '',
       description: '',
       brand: '',
+      productfccId: '',
       model: '',
-      httpLink: ''
+      httpLink: '',
+      status: 'active',
+      manual: ''
     });
     setPreview('');
     setImageFile(null);
     setPdfFile(null);
-  };
+    setCustomFields({ brand: false, productType: false });
+  }, []);
+
+  // Esc 快捷键关闭新增/编辑弹窗
+  useEffect(() => {
+    if (!showModal) return;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && !isSubmitting) {
+        toggleModal();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showModal, isSubmitting, toggleModal]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setNewProduct(prev => ({ ...prev, [name]: value }));
+    setNewProduct((prev) => ({ ...prev, [name]: value }));
     if (formErrors[name]) {
-      setFormErrors(prev => ({ ...prev, [name]: null }));
+      setFormErrors((prev) => ({ ...prev, [name]: null }));
+    }
+  };
+
+  // 下拉选择处理：选“其他”切换为自定义文本输入
+  const handleSelectChange = (e) => {
+    const { name, value } = e.target;
+    if (value === 'Others') {
+      setCustomFields((prev) => ({ ...prev, [name]: true }));
+      setNewProduct((prev) => ({ ...prev, [name]: '' }));
+    } else {
+      setCustomFields((prev) => ({ ...prev, [name]: false }));
+      setNewProduct((prev) => ({ ...prev, [name]: value }));
+    }
+    if (formErrors[name]) {
+      setFormErrors((prev) => ({ ...prev, [name]: null }));
+    }
+  };
+
+  // 退出自定义输入，切回下拉选择
+  const cancelCustomField = (fieldName) => {
+    setCustomFields((prev) => ({ ...prev, [fieldName]: false }));
+    setNewProduct((prev) => ({ ...prev, [fieldName]: '' }));
+    if (formErrors[fieldName]) {
+      setFormErrors((prev) => ({ ...prev, [fieldName]: null }));
     }
   };
 
@@ -274,148 +362,174 @@ export default function ProductManagement() {
 
   const validateForm = () => {
     const errors = {};
-    if (!newProduct.sku?.trim()) errors.sku = 'SKU不能为空';
-    if (!newProduct.model?.trim()) errors.model = 'Model不能为空';
-    if (!newProduct.brand) errors.brand = '请选择specially for品牌';
-    if (!newProduct.productType) errors.productType = '请选择产品类型';
+    if (!newProduct.sku?.trim()) errors.sku = 'SKU 不能为空';
+    if (!newProduct.model?.trim()) errors.model = 'Model 不能为空';
+    if (!newProduct.brand?.trim()) errors.brand = '请选择或输入品牌';
+    if (!newProduct.productfccId?.trim()) errors.productfccId = '型号（FCC ID）不能为空';
+    if (!newProduct.productType?.trim()) errors.productType = '请选择或输入产品类型';
     if (newProduct.httpLink && !isValidUrl(newProduct.httpLink)) {
-      errors.httpLink = '请输入有效的URL链接';
+      errors.httpLink = '请输入有效的 URL 链接';
     }
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
-  // ✅ 提交表单（使用已解构的 token）
-  // ✅ 替换 ProductManagement.js 中的 handleSubmit 函数
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  if (!validateForm()) return;
-  if (isSubmitting) return;
-  setIsSubmitting(true);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+    if (isSubmitting) return;
 
-  const hasNewFiles = imageFile || pdfFile;
-  const isEditing = !!editingProduct;
-  const url = isEditing ? `${API_PRODUCTS}/${newProduct.id}` : API_PRODUCTS;
+    if (!token) {
+      showAppToast('身份验证已过期，请重新登录', 'error');
+      navigate('/login');
+      return;
+    }
 
-  // 🔑 确保 token 存在
-  if (!token) {
-    alert('身份验证已过期，请重新登录');
-    navigate('/login');
-    return;
-  }
+    setIsSubmitting(true);
 
-  // 唯一性最终检查
-  const isSkuUnique = !newProduct.sku || !(await checkUniqueField('sku', newProduct.sku, editingProduct?.id));
-  const isModelUnique = !newProduct.model || !(await checkUniqueField('model', newProduct.model, editingProduct?.id));
-  if (skuError || modelError) {
-    alert('请修正重复的 SKU 或型号');
-    return;
-  }
+    try {
+      const trimmedSku = newProduct.sku.trim();
+      const trimmedModel = newProduct.model.trim();
+      const trimmedBrand = newProduct.brand.trim();
+      const trimmedFccId = (newProduct.productfccId || '').trim();
+      const trimmedType = newProduct.productType.trim();
+      const trimmedDesc = (newProduct.description || '').trim();
+      const trimmedLink = (newProduct.httpLink || '').trim();
+      const statusVal = newProduct.status || 'active';
 
-  try {
-    let response;
-    if (hasNewFiles) {
-      // 📤 有新文件：使用 multipart/form-data
-      const formData = new FormData();
-      formData.append('sku', newProduct.sku);
-      formData.append('model', newProduct.model);
-      formData.append('description', newProduct.description);
-      formData.append('brand', newProduct.brand);
-      formData.append('productType', newProduct.productType);
-      if (newProduct.httpLink?.trim()) {
-        formData.append('httpLink', newProduct.httpLink.trim());
-      }
-      if (imageFile) formData.append('image', imageFile);
-      if (pdfFile) formData.append('manual', pdfFile);
+      const [skuDupMsg, modelDupMsg] = await Promise.all([
+        checkUniqueField('sku', trimmedSku, editingProduct?.id),
+        checkUniqueField('model', trimmedModel, editingProduct?.id)
+      ]);
 
-      // ✅ 修复：弃用 fetchWithAuth，改用标准 fetch 显式携带 Token
-      response = await safeFetch(url, {
-        method: isEditing ? 'PUT' : 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }, // ⚠️ 不要手动设置 Content-Type
-        body: formData,
-      });
-    } else {
-      // 📤 无新文件：使用 JSON
-      const jsonData = {
-        sku: newProduct.sku,
-        model: newProduct.model,
-        description: newProduct.description,
-        brand: newProduct.brand,
-        productType: newProduct.productType,
-      };
-      if (newProduct.httpLink?.trim()) {
-        jsonData.httpLink = newProduct.httpLink.trim();
+      if (skuDupMsg || modelDupMsg) {
+        setFormErrors((prev) => ({
+          ...prev,
+          ...(skuDupMsg ? { sku: skuDupMsg } : {}),
+          ...(modelDupMsg ? { model: modelDupMsg } : {})
+        }));
+        showAppToast('请修正重复的 SKU 或型号', 'error');
+        return;
       }
 
+      const hasNewFiles = imageFile || pdfFile;
+      const isEditing = !!editingProduct;
+      const url = isEditing ? `${API_PRODUCTS}/${newProduct.id}` : API_PRODUCTS;
+
+      let response;
+      if (hasNewFiles) {
+        const formData = new FormData();
+        formData.append('sku', trimmedSku);
+        formData.append('model', trimmedModel);
+        formData.append('description', trimmedDesc);
+        formData.append('brand', trimmedBrand);
+        formData.append('productfccId', trimmedFccId);
+        formData.append('productType', trimmedType);
+        formData.append('status', statusVal);
+        formData.append('httpLink', trimmedLink);
+        if (imageFile) {
+          formData.append('image', imageFile);
+        } else if (isEditing && newProduct.image === null) {
+          formData.append('removeImage', 'true');
+        }
+        if (pdfFile) {
+          formData.append('manual', pdfFile);
+        } else if (isEditing && newProduct.manual === null) {
+          formData.append('removeManual', 'true');
+        }
+
+        response = await safeFetch(url, {
+          method: isEditing ? 'PUT' : 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData
+        });
+      } else {
+        const jsonData = {
+          sku: trimmedSku,
+          model: trimmedModel,
+          description: trimmedDesc,
+          brand: trimmedBrand,
+          productfccId: trimmedFccId,
+          productType: trimmedType,
+          status: statusVal,
+          httpLink: trimmedLink
+        };
+
+        if (isEditing) {
+          if (newProduct.image === null) jsonData.image = null;
+          else if (newProduct._hasImage) jsonData.image = newProduct.image;
+
+          if (newProduct.manual === null) jsonData.manual = null;
+          else if (newProduct._hasManual) jsonData.manual = newProduct.manual;
+        }
+
+        response = await safeFetch(url, {
+          method: isEditing ? 'PUT' : 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify(jsonData)
+        });
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.message || errorMessage;
+        } catch {
+          errorMessage = errorText.substring(0, 200);
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
       if (isEditing) {
-        if (newProduct.image === null) jsonData.image = null;
-        else if (newProduct._hasImage) jsonData.image = newProduct.image;
-
-        if (newProduct.manual === null) jsonData.manual = null;
-        else if (newProduct._hasManual) jsonData.manual = newProduct.manual;
+        setProducts((prev) => prev.map((p) => (p.id === data.id ? { ...p, ...data } : p)));
+        showAppToast('产品更新成功', 'success');
+      } else {
+        setProducts((prev) => [data, ...prev]);
+        showAppToast('产品添加成功', 'success');
       }
-
-      // ✅ 修复：显式携带 Content-Type 和 Authorization
-      response = await safeFetch(url, {
-        method: isEditing ? 'PUT' : 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` // ✅ 核心修复：强制注入令牌
-        },
-        body: JSON.stringify(jsonData),
-      });
+      toggleModal();
+      fetchProducts(searchTerm);
+      fetchAllProducts();
+    } catch (err) {
+      console.error('💥 提交失败:', err);
+      showAppToast(`操作失败：${err.message}`, 'error');
+    } finally {
+      setIsSubmitting(false);
     }
+  };
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMessage = `HTTP ${response.status}`;
-      try {
-        const errorJson = JSON.parse(errorText);
-        errorMessage = errorJson.message || errorMessage;
-      } catch {
-        errorMessage = errorText.substring(0, 200);
-      }
-      throw new Error(errorMessage);
-    }
-
-    const data = await response.json();
-    if (isEditing) {
-      setProducts(prev => prev.map(p => p.id === data.id ? data : p));
-      alert('产品更新成功');
-    } else {
-      setProducts(prev => [data, ...prev]);
-      alert('产品添加成功');
-    }
-    toggleModal();
-    fetchProducts();
-    fetchAllProducts();
-  } catch (err) {
-    console.error('💥 提交失败:', err);
-    alert(`操作失败: ${err.message}`);
-  } finally {
-    setIsSubmitting(false);
-  }
-};
-
-  const openEditModal = async (product) => {
+  const openEditModal = (product) => {
     setEditingProduct(product);
-    setNewProduct({ ...product });
-    if (product.image) {
-      const imageUrl = product.image.startsWith('http') || product.image.startsWith('data:')
-        ? product.image
-        : `${BASE_URL}${product.image.startsWith('/') ? product.image : '/' + product.image}`;
-      setPreview(imageUrl);
-    }
+    setFormErrors({});
+    setImageFile(null);
+    setPdfFile(null);
+    setNewProduct({
+      ...product,
+      productfccId: product.productfccId || '',
+      status: product.status || 'active',
+      _hasImage: !!product.image,
+      _hasManual: !!product.manual
+    });
+    const presetBrands = BRAND_OPTIONS.map((o) => o.value).filter((v) => v && v !== 'Others');
+    const presetTypes = PRODUCT_TYPE_OPTIONS.map((o) => o.value).filter((v) => v && v !== 'Others');
+    setCustomFields({
+      brand: Boolean(product.brand && !presetBrands.includes(product.brand)),
+      productType: Boolean(product.productType && !presetTypes.includes(product.productType))
+    });
+    setPreview(formatMediaUrl(product.image, BASE_URL) || '');
     setShowModal(true);
   };
 
-  // ✅ 删除确认（使用已解构的 token）
   const confirmDelete = async () => {
     if (!deleteId) return;
-
-    // ✅ token 已从 useUser 解构，直接使用
     if (!token) {
-      alert('请先登录');
+      showAppToast('请先登录', 'error');
       return;
     }
 
@@ -423,7 +537,7 @@ const handleSubmit = async (e) => {
       const res = await safeFetch(`${API_PRODUCTS}/${deleteId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
@@ -433,13 +547,13 @@ const handleSubmit = async (e) => {
         throw new Error(errorData.message || `HTTP ${res.status}`);
       }
 
-      setProducts(prev => prev.filter(p => p.id !== deleteId));
-      alert('删除成功');
-      fetchProducts();
+      setProducts((prev) => prev.filter((p) => p.id !== deleteId));
+      showAppToast('产品已删除', 'success');
+      fetchProducts(searchTerm);
       fetchAllProducts();
     } catch (err) {
       console.error('删除失败:', err);
-      alert(`删除失败: ${err.message}`);
+      showAppToast(`删除失败：${err.message}`, 'error');
     } finally {
       setShowDeleteDialog(false);
       setDeleteId(null);
@@ -451,539 +565,544 @@ const handleSubmit = async (e) => {
     setShowDeleteDialog(true);
   };
 
-  const getProductImageUrl = (product) => {
-    if (!product.image || product.image === 'null' || product.image === 'undefined') {
-      return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDMwMCAyMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjMwMCIgaGVpZ2h0PSIyMDAiIGZpbGw9IiNmMGYwZjAiLz48dGV4dCB4PSIxNTAiIHk9IjEwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjNjY2Ij5ObyBJbWFnZTwvdGV4dD48L3N2Zz4=';
-    }
-    if (product.image.startsWith('http') || product.image.startsWith('data:')) {
-      return product.image;
-    }
-    return `${BASE_URL}${product.image.startsWith('/') ? product.image : '/' + product.image}`;
-  };
-
-  const handleImageError = (e) => {
-    e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDMwMCAyMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjMwMCIgaGVpZ2h0PSIyMDAiIGZpbGw9IiNmNWY1ZjUiLz48dGV4dCB4PSIxNTAiIHk9IjEwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjOTk5Ij5JbWFnZSBFcnJvcjwvdGV4dD48L3N2Zz4=';
-    e.target.onerror = null;
-  };
-
-  const renderRelationModal = (isOpen, onClose, title, relatedProducts) => {
-    if (!isOpen) return null;
-    return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto shadow-2xl">
-          <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
-            <h3 className="text-lg font-bold text-gray-800">{title}</h3>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <div className="p-6">
-            {relatedProducts?.length > 0 ? (
-              <div className="space-y-4">
-                {relatedProducts.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"
-                    onClick={() => {
-                      onClose();
-                      const target = document.getElementById(`product-${p.id}`);
-                      if (target) {
-                        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        target.classList.add('ring-2', 'ring-indigo-400');
-                        setTimeout(() => target.classList.remove('ring-2', 'ring-indigo-400'), 2000);
-                      }
-                    }}
-                  >
-                    <div className="w-12 h-12 bg-gray-100 rounded mr-4 overflow-hidden flex-shrink-0">
-                      <img
-                        src={getProductImageUrl(p)}
-                        alt={p.model}
-                        className="w-full h-full object-cover"
-                        onError={handleImageError}
-                      />
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-800">{p.model}</p>
-                      <p className="text-sm text-gray-600">{p.brand} · {p.productType}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-center py-8">暂无相关产品</p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const getRelatedProducts = (ids) => {
     if (!ids || !Array.isArray(ids)) return [];
     return ids
-      .map(id => allProducts.find(p => p.id === id))
-      .filter(p => p);
+      .map((id) => allProducts.find((p) => p.id === id))
+      .filter(Boolean);
   };
 
   const renderProductList = () => {
     if (loading) {
-      return (
-        <div className="flex flex-col justify-center items-center py-16">
-          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-600 mb-4"></div>
-          <p className="text-gray-600">加载产品数据中...</p>
-          <p className="text-sm text-gray-500 mt-2">请稍候</p>
-        </div>
-      );
+      return <CardGridSkeleton count={6} />;
     }
+
     if (error) {
-      return (
-        <div className="flex flex-col items-center justify-center py-16 text-red-500">
-          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-            <svg className="w-8 h-8 text-red-600" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <p className="text-red-700 mb-3">数据加载失败：{error}</p>
-          <button
-            onClick={() => fetchProducts()}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            重试
-          </button>
-        </div>
-      );
+      return <ErrorState message={error} onRetry={() => fetchProducts(searchTerm)} />;
     }
+
     if (products.length === 0) {
       return (
-        <div className="flex flex-col items-center justify-center py-16">
-          <svg className="w-16 h-16 text-gray-400 mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <h2 className="text-xl font-medium text-gray-700 mb-2">
-            {searchTerm ? '未找到相关产品' : '暂无产品'}
-          </h2>
-          <p className="text-gray-500 text-center max-w-md mb-6">
-            {searchTerm
-              ? `没有找到包含 "${searchTerm}"的产品，请尝试其他关键词。`
-              : '当前还没有任何产品，点击 "添加产品"按钮开始添加'
-            }
-          </p>
-          {searchTerm ? (
-            <button
-              onClick={clearSearch}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-            >
-              查看所有产品
-            </button>
-          ) : (
-            <button
-              onClick={toggleModal}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-            >
-              添加第一个产品
-            </button>
-          )}
-        </div>
+        <EmptyState
+          title={searchTerm ? '未找到相关产品' : '暂无产品'}
+          description={
+            searchTerm
+              ? `没有找到包含 "${searchTerm}" 的产品，请尝试其他关键词。`
+              : '当前产品库还没有任何记录，点击下方按钮添加第一个产品。'
+          }
+          actionLabel={searchTerm ? '查看所有产品' : '添加第一个产品'}
+          onAction={searchTerm ? clearSearch : toggleModal}
+        />
       );
     }
+
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {products.map((product) => (
-          <div
-            key={product.id}
-            className="bg-white rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-shadow duration-300"
-          >
-            <div className="flex flex-col md:flex-row">
-              <div className="w-full md:w-1/2 relative">
-                <div className="h-64 md:h-full bg-gray-100 overflow-hidden">
-                  <img
-                    src={product.image ? `${product.image}` : 'https://picsum.photos/300/200?random=123'}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        {products.map((product) => {
+          const statusMeta = getStatusMeta(product.status);
+          const compatibleCount = product.compatibleIds?.length || 0;
+          const upgradeCount = product.upgradeIds?.length || 0;
+          const replacementCount = product.replacementIds?.length || 0;
+
+          return (
+            <article
+              id={`product-${product.id}`}
+              key={product.id}
+              className="bg-white rounded-xl border border-slate-200 hover:border-slate-300 hover:shadow-md transition-all duration-200 flex flex-col overflow-hidden"
+            >
+              {/* 上半部分：正方形图片 + 关键信息（与前台一致） */}
+              <div className="flex flex-row border-b border-slate-100">
+                <div className="w-36 sm:w-40 aspect-square shrink-0 bg-slate-50 border-r border-slate-100 overflow-hidden">
+                  <MediaThumb
+                    src={formatMediaUrl(product.image, BASE_URL)}
                     alt={product.model || '产品图片'}
-                    className="w-full h-full object-cover"
-                    onError={handleImageError}
-                    loading="lazy"
+                    className="w-full h-full aspect-square object-cover"
                   />
-                  {product.sku && (
-                    <div className="absolute top-2 left-2 px-2 py-1 bg-black/50 text-white text-xs rounded">
-                      SKU: {product.sku || '未知'}
+                </div>
+
+                <div className="flex-1 min-w-0 p-3 sm:p-3.5 flex flex-col justify-between gap-2">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3
+                        className="text-[15px] font-semibold text-slate-900 truncate leading-snug"
+                        title={product.model || ''}
+                      >
+                        <span className="font-normal text-slate-400 mr-1">Model:</span>
+                        {product.model || '未命名型号'}
+                      </h3>
+                      <span className={`text-xs font-medium whitespace-nowrap shrink-0 ${statusMeta.className}`}>
+                        {statusMeta.label}
+                      </span>
                     </div>
-                  )}
-                  <div className="absolute top-2 right-2 px-2 py-1 bg-black/50 text-white text-xs rounded">
-                    {product.productType || '未知TYPE'}
+
+                    <p className="text-xs text-slate-500 truncate">
+                      <span className="font-mono tabular-nums" title={product.sku || ''}>
+                        SKU: {product.sku || '—'}
+                      </span>
+                      <span aria-hidden="true" className="mx-1.5 text-slate-300">·</span>
+                      <span>{product.productType || '无类型'}</span>
+                    </p>
                   </div>
+
+                  {/* 外链与说明书 */}
+                  <div className="flex items-center gap-3 text-xs">
+                    {product.httpLink ? (
+                      <a
+                        href={product.httpLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 font-medium whitespace-nowrap"
+                        title={product.httpLink}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                        产品链接
+                      </a>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-slate-300 whitespace-nowrap">
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                        无链接
+                      </span>
+                    )}
+
+                    {product.manual ? (
+                      <a
+                        href={formatMediaUrl(product.manual, BASE_URL)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 font-medium whitespace-nowrap"
+                      >
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        说明书
+                      </a>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-slate-300 whitespace-nowrap">
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        无说明书
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 关联数量快捷查看 */}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs tabular-nums">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (compatibleCount > 0) openRelationModal(product, 'compatible');
+                      }}
+                      disabled={compatibleCount === 0}
+                      className={`whitespace-nowrap transition-colors ${
+                        compatibleCount > 0
+                          ? 'text-emerald-700 hover:text-emerald-800 hover:underline font-medium'
+                          : 'text-slate-400 cursor-default'
+                      }`}
+                    >
+                      可匹配 {compatibleCount}
+                    </button>
+                    <span aria-hidden="true" className="text-slate-200">/</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (upgradeCount > 0) openRelationModal(product, 'upgrade');
+                      }}
+                      disabled={upgradeCount === 0}
+                      className={`whitespace-nowrap transition-colors ${
+                        upgradeCount > 0
+                          ? 'text-indigo-600 hover:text-indigo-800 hover:underline font-medium'
+                          : 'text-slate-400 cursor-default'
+                      }`}
+                    >
+                      升级款 {upgradeCount}
+                    </button>
+                    <span aria-hidden="true" className="text-slate-200">/</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (replacementCount > 0) openRelationModal(product, 'replacement');
+                      }}
+                      disabled={replacementCount === 0}
+                      className={`whitespace-nowrap transition-colors ${
+                        replacementCount > 0
+                          ? 'text-amber-700 hover:text-amber-800 hover:underline font-medium'
+                          : 'text-slate-400 cursor-default'
+                      }`}
+                    >
+                      可替代 {replacementCount}
+                    </button>
+                  </div>
+
+                  {/* 完美替代 */}
+                  <p
+                    className="text-xs text-slate-600 truncate"
+                    title={`完美替代：${[product.brand, product.productfccId].filter(Boolean).join(' ') || '—'}`}
+                  >
+                    <span className="text-slate-400">完美替代：</span>
+                    {product.brand || product.productfccId ? (
+                      <>
+                        {product.brand && (
+                          <span className="font-medium text-slate-700">{product.brand}</span>
+                        )}
+                        {product.brand && product.productfccId && ' '}
+                        {product.productfccId && (
+                          <span className="font-mono tabular-nums text-slate-700">
+                            {product.productfccId}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </p>
                 </div>
               </div>
-              <div className="w-full md:w-1/2 p-4 md:p-6">
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span>
-                      <span className="font-bold text-gray-900">Model: </span>
-                      <span className="text-gray-600">{product.model}</span>
-                    </span>
-                  </div>
-                  <div className="flex space-x-2 mb-4">
-                    <span className="px-3 py-1 bg-green-100 text-green-800 text-sm rounded-full">
-                      {product.brand || '未知品牌'}
-                    </span>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="flex space-x-4 mt-2">
-                    {product.httpLink && (
-                      <div>
-                        <a
-                          href={product.httpLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 text-sm truncate block inline-flex items-center"
-                          title={product.httpLink}
-                        >
-                          <svg className="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                          产品链接
-                        </a>
-                      </div>
-                    )}
-                    {product.manual && (
-                      <div>
-                        <a
-                          href={product.manual.startsWith('http') ? product.manual : `${BASE_URL}${product.manual.startsWith('/') ? product.manual : '/' + product.manual}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 text-sm truncate block inline-flex items-center"
-                        >
-                          <svg className="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                          说明书
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex space-x-4 mt-2">
-                    {product.compatibleIds?.length > 0 && (
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setSelectedProductForView(product);
-                          setShowApplicableModal(true);
-                        }}
-                        className="text-green-600 hover:text-green-800 text-sm inline-flex items-center"
-                      >
-                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        可匹配 ({product.compatibleIds.length})
-                      </button>
-                    )}
-                    {product.upgradeIds?.length > 0 && (
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setSelectedProductForView(product);
-                          setShowUpgradeModal(true);
-                        }}
-                        className="text-green-600 hover:text-green-800 text-sm inline-flex items-center"
-                      >
-                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        升级款 ({product.upgradeIds.length})
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex space-x-4 mt-2">
-                    {product.replacementIds?.length > 0 && (
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setSelectedProductForView(product);
-                          setShowReplacementModal(true);
-                        }}
-                        className="text-purple-600 hover:text-purple-800 text-sm inline-flex items-center"
-                      >
-                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        可替换 ({product.replacementIds.length})
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="border-t border-gray-200 p-4 md:p-6">
-              <div className="mb-4">
-                <p className="text-gray-700 mb-2 font-medium">描述</p>
-                <div className="line-clamp-2 text-gray-600 text-sm">
+
+              {/* 中间：描述 */}
+              <div className="px-4 py-3 flex-1 bg-white">
+                <p className="text-xs font-medium text-slate-400 mb-1">描述</p>
+                <p
+                  className="text-sm text-slate-600 line-clamp-2 leading-relaxed min-h-[2.625rem]"
+                  title={product.description || ''}
+                >
                   {product.description || '暂无描述'}
+                </p>
+              </div>
+
+              {/* 底部管理操作栏：整齐的 4 等分按钮 */}
+              <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/70 mt-auto">
+                <div className="grid grid-cols-4 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => openDetailModal(product)}
+                    className="inline-flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-medium hover:bg-slate-100 transition-colors whitespace-nowrap"
+                  >
+                    <Eye className="w-3.5 h-3.5 shrink-0" />
+                    详情
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openRelationsModal(product)}
+                    className="inline-flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-indigo-200 text-indigo-700 rounded-lg text-xs font-medium hover:bg-indigo-50 transition-colors whitespace-nowrap"
+                  >
+                    <Link2 className="w-3.5 h-3.5 shrink-0" />
+                    关系
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openEditModal(product)}
+                    className="inline-flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-emerald-200 text-emerald-700 rounded-lg text-xs font-medium hover:bg-emerald-50 transition-colors whitespace-nowrap"
+                  >
+                    <Pencil className="w-3.5 h-3.5 shrink-0" />
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteClick(product.id)}
+                    className="inline-flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-xs font-medium hover:bg-rose-50 transition-colors whitespace-nowrap"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                    删除
+                  </button>
                 </div>
               </div>
-              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-100">
-                <button
-                  onClick={() => {
-                    setSelectedProduct(product);
-                    setShowDetailModal(true);
-                  }}
-                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors flex items-center text-sm"
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  详情
-                </button>
-                <button
-                  onClick={() => openRelationsModal(product)}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center text-sm"
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                  </svg>
-                  管理关系
-                </button>
-                <button
-                  onClick={() => openEditModal(product)}
-                  className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center text-sm"
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                  编辑
-                </button>
-                <button
-                  onClick={() => handleDeleteClick(product.id)}
-                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center text-sm"
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                  删除
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
+            </article>
+          );
+        })}
       </div>
     );
   };
 
+  const subtitleText = searchTerm && !loading
+    ? `搜索 "${searchTerm}" · 共 ${products.length} 个结果`
+    : loading
+      ? '正在同步产品列表...'
+      : `共 ${products.length} 个产品`;
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100">
-      <header className="bg-white shadow-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-indigo-600">产品信息管理</h1>
-
-              <div className="relative w-full max-w-xl mx-8 flex-1 min-w-[200px]">
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="输入SKU或Model搜索产品..."
-                    value={searchTerm}
-                    onChange={handleSearchChange}
-                    className="w-full px-4 py-2 pl-10 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
-                    aria-label="搜索产品"
-                    disabled={loading && !searching} 
-                  />
-                  <svg className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-
-
-              {searching && (
-                <div className="absolute right-3 top-2.5">
-                  <div className="animate-spin h-4 w-4 border-t-2 border-b-2 border-indigo-600 rounded-full"></div>
-                </div>
-              )}
-              {searchTerm && !searching && (
-                <button
-                  onClick={clearSearch}
-                  className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
-                  disabled={loading}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-            {searching && <p className="text-xs text-gray-500 mt-1">正在搜索...</p>}
-          </div>
+    <div>
+      <PageToolbar
+        title="产品信息管理"
+        subtitle={subtitleText}
+        searchTerm={searchTerm}
+        onSearchChange={handleSearchChange}
+        onClearSearch={clearSearch}
+        searchPlaceholder="输入 SKU、Model 或 FCC ID 搜索产品..."
+        searching={searching}
+        loading={loading}
+        actionButton={
           <button
+            type="button"
             onClick={toggleModal}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center"
             disabled={loading}
+            className="inline-flex items-center justify-center gap-1.5 h-10 px-4 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors whitespace-nowrap shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-            </svg>
+            <Plus className="w-4 h-4" />
             添加产品
           </button>
-        </div>
-      </header>
+        }
+      />
 
-      <main className="container mx-auto px-4 py-8">
-        {searchTerm && !loading && (
-          <div className="mb-6 text-sm text-gray-600">
-            搜索 "<span className="font-medium">{searchTerm}</span>" 的结果 ({products.length} 个)
-          </div>
-        )}
-        {renderProductList()}
-        <ConfirmDialog
-          isOpen={showDeleteDialog}
-          message="确定要删除该产品吗？此操作不可恢复。"
-          confirmText="确认删除"
-          cancelText="取消"
-          onConfirm={confirmDelete}
-          onCancel={() => setShowDeleteDialog(false)}
-          isDanger={true}
-        />
-      </main>
+      {renderProductList()}
 
-      <footer className="bg-white border-t border-gray-200 py-6 mt-12">
-        <div className="container mx-auto px-4">
-          <div className="flex flex-col md:flex-row justify-between items-center">
-            <p className="text-gray-600">© {new Date().getFullYear()} 产品中心 | 所有产品信息来源于数据库</p>
-            <div className="mt-2 md:mt-0 text-sm text-gray-500">
-              {products.length > 0 && `当前显示 ${products.length} 个产品`}
-            </div>
-          </div>
-        </div>
-      </footer>
+      <ConfirmDialog
+        isOpen={showDeleteDialog}
+        title="删除产品"
+        message="确定要删除该产品吗？此操作不可恢复。"
+        confirmText="确认删除"
+        cancelText="取消"
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          setShowDeleteDialog(false);
+          setDeleteId(null);
+        }}
+        isDanger={true}
+      />
 
       {/* 新增/编辑产品模态框 */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-20 p-4">
-          <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="sticky top-0 bg-white border-b px-6 py-4">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold text-gray-800">
-                  {editingProduct ? '编辑产品' : '添加新产品'}
-                </h2>
-                <button
-                  onClick={toggleModal}
-                  className="text-gray-400 hover:text-gray-600"
-                  type="button"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+        <div
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center z-50 p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white border border-slate-200 rounded-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-white">
+              <h2 className="text-base font-semibold text-slate-900">
+                {editingProduct ? '编辑产品' : '添加新产品'}
+              </h2>
+              <button
+                type="button"
+                onClick={toggleModal}
+                aria-label="关闭"
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6">
-              <div className="space-y-6">
+
+            <form onSubmit={handleSubmit} className="overflow-y-auto flex-1">
+              <div className="p-6 space-y-5">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      SKU <span className="text-red-500">*</span>
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                      SKU <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
                       name="sku"
-                      value={newProduct.sku}
+                      value={newProduct.sku || ''}
                       onChange={handleInputChange}
-                      className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                        formErrors.sku ? 'border-red-500' : 'border-gray-300'
+                      className={`w-full h-10 px-3 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                        formErrors.sku ? 'border-rose-400' : 'border-slate-200'
                       }`}
-                      placeholder="请输入产品SKU"
+                      placeholder="请输入产品 SKU"
                     />
-                    {formErrors.sku && <p className="text-red-500 text-sm mt-1">{formErrors.sku}</p>}
+                    {formErrors.sku && <p className="text-rose-600 text-xs mt-1">{formErrors.sku}</p>}
                   </div>
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Model <span className="text-red-500">*</span>
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                      Model <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
                       name="model"
-                      value={newProduct.model}
+                      value={newProduct.model || ''}
                       onChange={handleInputChange}
-                      className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                        formErrors.model ? 'border-red-500' : 'border-gray-300'
+                      className={`w-full h-10 px-3 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                        formErrors.model ? 'border-rose-400' : 'border-slate-200'
                       }`}
-                      placeholder="请输入产品Model"
+                      placeholder="请输入产品 Model"
                     />
-                    {formErrors.model && <p className="text-red-500 text-sm mt-1">{formErrors.model}</p>}
+                    {formErrors.model && <p className="text-rose-600 text-xs mt-1">{formErrors.model}</p>}
                   </div>
+
+                  {/* 完美替代（单独一行：品牌 + 型号（FCC ID），均为必填） */}
+                  <div className="md:col-span-2 p-3.5 bg-slate-50/70 border border-slate-200 rounded-lg">
+                    <label className="block text-xs font-semibold text-slate-700 mb-2.5">
+                      完美替代 <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          品牌 <span className="text-rose-500">*</span>
+                        </label>
+                        {!customFields.brand ? (
+                          <select
+                            name="brand"
+                            value={newProduct.brand || ''}
+                            onChange={handleSelectChange}
+                            className={`w-full h-10 px-3 text-sm bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                              formErrors.brand ? 'border-rose-400' : 'border-slate-200'
+                            }`}
+                          >
+                            {BRAND_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              name="brand"
+                              value={newProduct.brand || ''}
+                              onChange={handleInputChange}
+                              autoFocus
+                              className={`w-full h-10 px-3 text-sm bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                                formErrors.brand ? 'border-rose-400' : 'border-slate-200'
+                              }`}
+                              placeholder="请输入自定义品牌"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => cancelCustomField('brand')}
+                              title="返回下拉选择"
+                              aria-label="返回品牌下拉选择"
+                              className="h-10 w-10 inline-flex items-center justify-center shrink-0 text-slate-400 hover:text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                        {formErrors.brand && (
+                          <p className="text-rose-600 text-xs mt-1">{formErrors.brand}</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          型号（FCC ID） <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          name="productfccId"
+                          value={newProduct.productfccId || ''}
+                          onChange={handleInputChange}
+                          className={`w-full h-10 px-3 text-sm font-mono bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                            formErrors.productfccId ? 'border-rose-400' : 'border-slate-200'
+                          }`}
+                          placeholder="请输入型号（FCC ID）"
+                        />
+                        {formErrors.productfccId && (
+                          <p className="text-rose-600 text-xs mt-1">{formErrors.productfccId}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Brand(specially for) <span className="text-red-500">*</span>
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                      产品类型 <span className="text-rose-500">*</span>
+                    </label>
+                    {!customFields.productType ? (
+                      <select
+                        name="productType"
+                        value={newProduct.productType || ''}
+                        onChange={handleSelectChange}
+                        className={`w-full h-10 px-3 text-sm bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                          formErrors.productType ? 'border-rose-400' : 'border-slate-200'
+                        }`}
+                      >
+                        {PRODUCT_TYPE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          name="productType"
+                          value={newProduct.productType || ''}
+                          onChange={handleInputChange}
+                          autoFocus
+                          className={`w-full h-10 px-3 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                            formErrors.productType ? 'border-rose-400' : 'border-slate-200'
+                          }`}
+                          placeholder="请输入自定义产品类型"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => cancelCustomField('productType')}
+                          title="返回下拉选择"
+                          aria-label="返回产品类型下拉选择"
+                          className="h-10 w-10 inline-flex items-center justify-center shrink-0 text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                    {formErrors.productType && (
+                      <p className="text-rose-600 text-xs mt-1">{formErrors.productType}</p>
+                    )}
+                  </div>
+
+                  {/* 销售状态（下拉框：在售 / 清仓 / 开发中 / 停产） */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                      销售状态 <span className="text-rose-500">*</span>
                     </label>
                     <select
-                      name="brand"
-                      value={newProduct.brand}
+                      name="status"
+                      value={newProduct.status || 'active'}
                       onChange={handleInputChange}
-                      className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                        formErrors.brand ? 'border-red-500' : 'border-gray-300'
-                      }`}
+                      className="w-full h-10 px-3 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                     >
-                      {BRAND_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
+                      {STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
                       ))}
                     </select>
-                    {formErrors.brand && <p className="text-red-500 text-sm mt-1">{formErrors.brand}</p>}
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      产品类型 <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      name="productType"
-                      value={newProduct.productType}
-                      onChange={handleInputChange}
-                      className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                        formErrors.productType ? 'border-red-500' : 'border-gray-300'
-                      }`}
-                    >
-                      {PRODUCT_TYPE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                    {formErrors.productType && <p className="text-red-500 text-sm mt-1">{formErrors.productType}</p>}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
                       产品链接
                     </label>
                     <input
                       type="url"
                       name="httpLink"
-                      value={newProduct.httpLink}
+                      value={newProduct.httpLink || ''}
                       onChange={handleInputChange}
-                      className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                        formErrors.httpLink ? 'border-red-500' : 'border-gray-300'
+                      className={`w-full h-10 px-3 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                        formErrors.httpLink ? 'border-rose-400' : 'border-slate-200'
                       }`}
-                      placeholder="https://example.com/product"
+                      placeholder="https://example.com/product（可选）"
                     />
-                    {formErrors.httpLink ? (
-                      <p className="text-red-500 text-sm mt-1">{formErrors.httpLink}</p>
-                    ) : (
-                      <p className="text-gray-500 text-sm mt-1">请输入完整的URL地址（可选）</p>
+                    {formErrors.httpLink && (
+                      <p className="text-rose-600 text-xs mt-1">{formErrors.httpLink}</p>
                     )}
                   </div>
                 </div>
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">描述</label>
+                  <label className="block text-xs font-medium text-slate-700 mb-1.5">描述</label>
                   <textarea
                     name="description"
-                    value={newProduct.description}
+                    value={newProduct.description || ''}
                     onChange={handleInputChange}
                     rows="3"
-                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                      formErrors.description ? 'border-red-500' : 'border-gray-300'
+                    className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                      formErrors.description ? 'border-rose-400' : 'border-slate-200'
                     }`}
                     placeholder="请输入产品详细描述..."
                   />
-                  {formErrors.description && <p className="text-red-500 text-sm mt-1">{formErrors.description}</p>}
+                  {formErrors.description && (
+                    <p className="text-rose-600 text-xs mt-1">{formErrors.description}</p>
+                  )}
                 </div>
-                <div className="flex flex-col md:flex-row gap-6 mb-6">
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-1">
+                  {/* 产品图片 */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">产品图片</label>
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-4">
-                        <label className="cursor-pointer px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                          <span>选择</span>
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">产品图片</label>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 border border-slate-200 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-100 transition-colors whitespace-nowrap">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>选择图片</span>
                           <input
                             type="file"
                             accept="image/*"
@@ -992,44 +1111,38 @@ const handleSubmit = async (e) => {
                             id="image-upload"
                           />
                         </label>
-                        <p className="text-sm text-gray-500">JPG, PNG, GIF, WebP 格式, 最大5MB</p>
+                        <span className="text-xs text-slate-400">JPG/PNG/WebP，≤ 5MB</span>
                       </div>
                       {preview && (
-                        <div className="mt-4">
-                          <p className="text-sm text-gray-700 mb-2">图片预览:</p>
-                          <div className="relative w-48 h-48 border border-gray-300 rounded-lg overflow-hidden">
-                            <img
-                              src={preview}
-                              alt="产品图片预览"
-                              className="w-full h-full object-cover"
-                              onError={(e) => {
-                                e.target.src = 'https://via.placeholder.com/300x200?text=图片错误';
-                              }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPreview('');
-                                setImageFile(null);
-                                setNewProduct(prev => ({ ...prev, image: null, _hasImage: false }));
-                              }}
-                              className="absolute top-2 right-2 p-1 bg-black/50 text-white rounded-full hover:bg-black/70"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </div>
+                        <div className="relative w-32 h-32 aspect-square border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
+                          <MediaThumb src={preview} alt="产品图片预览" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPreview('');
+                              setImageFile(null);
+                              setNewProduct((prev) => ({ ...prev, image: null, _hasImage: false }));
+                              const inputEl = document.getElementById('image-upload');
+                              if (inputEl) inputEl.value = '';
+                            }}
+                            aria-label="移除图片"
+                            className="absolute top-1.5 right-1.5 p-1 bg-slate-900/60 text-white rounded-md hover:bg-slate-900/80 transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       )}
                     </div>
                   </div>
+
+                  {/* PDF 说明书 */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">PDF 说明书</label>
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-4">
-                        <label className="cursor-pointer px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                          <span>选择 PDF 文件</span>
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">PDF 说明书</label>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 border border-slate-200 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-100 transition-colors whitespace-nowrap">
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>选择 PDF</span>
                           <input
                             type="file"
                             accept=".pdf"
@@ -1038,51 +1151,54 @@ const handleSubmit = async (e) => {
                             id="pdf-upload"
                           />
                         </label>
-                        <p className="text-sm text-gray-500">PDF格式，最大5MB</p>
+                        <span className="text-xs text-slate-400">PDF 格式，≤ 5MB</span>
                       </div>
+
                       {pdfFile && (
-                        <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-700">
-                            已选择文件: <span className="font-medium">{pdfFile.name}</span>
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            大小: {(pdfFile.size / 1024).toFixed(2)} KB
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => setPdfFile(null)}
-                            className="ml-2 text-red-500 hover:text-red-700"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
-                      {!pdfFile && newProduct.manual && (
-                        <div className="mt-4 flex items-start">
-                          <div className="flex-1">
-                            <p className="text-sm text-gray-700 mb-2">当前已有说明书:</p>
-                            <a
-                              href={newProduct.manual.startsWith('http') ? newProduct.manual : `${BASE_URL}${newProduct.manual.startsWith('/') ? newProduct.manual : '/' + newProduct.manual}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-600 hover:text-blue-800 text-sm break-all"
-                            >
-                              {newProduct.manual}
-                            </a>
+                        <div className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-slate-700 truncate">{pdfFile.name}</p>
+                            <p className="text-[11px] text-slate-400 tabular-nums">
+                              {(pdfFile.size / 1024).toFixed(1)} KB
+                            </p>
                           </div>
                           <button
                             type="button"
                             onClick={() => {
                               setPdfFile(null);
-                              setNewProduct(prev => ({ ...prev, manual: null, _hasManual: false }));
+                              const inputEl = document.getElementById('pdf-upload');
+                              if (inputEl) inputEl.value = '';
                             }}
-                            className="ml-2 text-red-500 hover:text-red-700"
+                            aria-label="移除文件"
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors shrink-0"
                           >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+
+                      {!pdfFile && newProduct.manual && (
+                        <div className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                          <a
+                            href={formatMediaUrl(newProduct.manual, BASE_URL)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-indigo-600 hover:underline truncate"
+                          >
+                            {newProduct.manual}
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPdfFile(null);
+                              setNewProduct((prev) => ({ ...prev, manual: null, _hasManual: false }));
+                              const inputEl = document.getElementById('pdf-upload');
+                              if (inputEl) inputEl.value = '';
+                            }}
+                            aria-label="移除说明书"
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors shrink-0"
+                          >
+                            <X className="w-4 h-4" />
                           </button>
                         </div>
                       )}
@@ -1090,23 +1206,23 @@ const handleSubmit = async (e) => {
                   </div>
                 </div>
               </div>
-              <div className="mt-8 pt-6 border-t border-gray-200 flex justify-end space-x-3">
+
+              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2.5">
                 <button
                   type="button"
                   onClick={toggleModal}
-                  className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors whitespace-nowrap disabled:opacity-50"
                 >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                  </svg>
-                  {isSubmitting ? '提交中...' : editingProduct ? '更新产品' : '添加产品'}
+                  <Check className="w-4 h-4" />
+                  {isSubmitting ? '提交中...' : editingProduct ? '保存修改' : '添加产品'}
                 </button>
               </div>
             </form>
@@ -1120,128 +1236,45 @@ const handleSubmit = async (e) => {
           product={selectedProductForRelations}
           onClose={closeRelationsModal}
           onSave={() => {
-            fetchProducts();
+            fetchProducts(searchTerm);
+            fetchAllProducts();
           }}
           apiUrl="/api/products"
         />
       )}
 
-      {/* 可匹配/可替换模态框 */}
-      {renderRelationModal(
-        showApplicableModal,
-        () => setShowApplicableModal(false),
-        '可匹配产品',
-        selectedProductForView?.compatibleIds
-          ? getRelatedProducts(selectedProductForView.compatibleIds)
-          : []
-      )}
-      {renderRelationModal(
-        showUpgradeModal,
-        () => setShowUpgradeModal(false),
-        '升级款产品',
-        selectedProductForView?.upgradeIds
-          ? getRelatedProducts(selectedProductForView.upgradeIds)
-          : []
-      )}
-      {renderRelationModal(
-        showReplacementModal,
-        () => setShowReplacementModal(false),
-        '可替换产品',
-        selectedProductForView?.replacementIds
-          ? getRelatedProducts(selectedProductForView.replacementIds)
-          : []
-      )}
+      {/* 可匹配/升级/替换查看模态框 */}
+      <ProductRelationModal
+        isOpen={relationModalState.isOpen}
+        onClose={closeRelationModal}
+        product={relationModalState.product}
+        initialTab={relationModalState.initialTab}
+        getRelatedProducts={getRelatedProducts}
+        baseUrl={BASE_URL}
+        onSelectProduct={(p) => {
+          closeRelationModal();
+          const target = document.getElementById(`product-${p.id}`);
+          if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target.classList.add('ring-2', 'ring-indigo-500');
+            setTimeout(() => target.classList.remove('ring-2', 'ring-indigo-500'), 2000);
+          }
+        }}
+      />
 
-      {/* 产品详情模态框 */}
-      {showDetailModal && selectedProduct && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">产品详情</h2>
-              <button
-                onClick={() => setShowDetailModal(false)}
-                className="text-gray-500 hover:text-gray-700 text-2xl"
-              >
-                ×
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">型号 (Model)</label>
-                <p className="mt-1 p-2 bg-gray-50 rounded">{selectedProduct.model}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">SKU</label>
-                <p className="mt-1 p-2 bg-gray-50 rounded">{selectedProduct.sku}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">品牌</label>
-                <p className="mt-1 p-2 bg-gray-50 rounded">{selectedProduct.brand || '—'}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">产品类型</label>
-                <p className="mt-1 p-2 bg-gray-50 rounded">{selectedProduct.productType || '—'}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">状态</label>
-                <p className="mt-1 p-2 bg-gray-50 rounded">
-                  {selectedProduct.status === 'active' ? '在售' :
-                   selectedProduct.status === 'discontinued' ? '停产' : '开发中'}
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">描述</label>
-                <p className="mt-1 p-2 bg-gray-50 rounded whitespace-pre-wrap">
-                  {selectedProduct.description || '—'}
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">产品链接</label>
-                {selectedProduct.httpLink ? (
-                  <a
-                    href={selectedProduct.httpLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline"
-                  >
-                    {selectedProduct.httpLink}
-                  </a>
-                ) : (
-                  <p className="mt-1 p-2 bg-gray-50 rounded">—</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">产品图片</label>
-                {selectedProduct.image ? (
-                  <img
-                    src={getProductImageUrl(selectedProduct)}
-                    alt="产品图片"
-                    className="mt-2 max-w-full h-auto max-h-64 object-contain border border-gray-300 rounded"
-                    onError={handleImageError}
-                  />
-                ) : (
-                  <p className="mt-2 text-gray-500">无图片</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">说明书</label>
-                {selectedProduct.manual ? (
-                  <a
-                    href={getProductImageUrl({ image: selectedProduct.manual })}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline mt-2 inline-block"
-                  >
-                    查看 PDF 说明书
-                  </a>
-                ) : (
-                  <p className="mt-2 text-gray-500">无说明书</p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 产品详情模态框（与前台一致） */}
+      {detailModalStack.map((entry, idx) => (
+        <ProductDetailModal
+          key={`${entry.product.id}-${idx}`}
+          product={entry.product}
+          relationLabel={entry.relationLabel}
+          depth={idx}
+          isTopmost={idx === detailModalStack.length - 1}
+          onClose={closeTopDetailModal}
+          getRelatedProducts={getRelatedProducts}
+          baseUrl={BASE_URL}
+        />
+      ))}
     </div>
   );
 }

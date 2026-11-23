@@ -34,7 +34,6 @@ module.exports = (sequelize, DataTypes) => {
       defaultValue: 'user',
       allowNull: false
     },
-/*
     isActive: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
@@ -44,12 +43,6 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.TEXT,
       allowNull: true
     },
-
-    lastLogin: {
-      type: DataTypes.DATE,
-      allowNull: true
-    }
-    */
     lastActivity: {
       type: DataTypes.DATE,
       allowNull: true
@@ -75,16 +68,16 @@ module.exports = (sequelize, DataTypes) => {
     ]
   });
 
-  // 密码哈希钩子（如果需要在模型层处理）
+  // 密码哈希钩子（防止与 controller 层的 bcrypt.hash 重复加密）
   User.beforeCreate(async (user) => {
-    if (user.password) {
+    if (user.password && !user.password.startsWith('$2')) {
       const bcrypt = require('bcryptjs');
       user.password = await bcrypt.hash(user.password, 10);
     }
   });
 
   User.beforeUpdate(async (user) => {
-    if (user.changed('password')) {
+    if (user.changed('password') && user.password && !user.password.startsWith('$2')) {
       const bcrypt = require('bcryptjs');
       user.password = await bcrypt.hash(user.password, 10);
     }

@@ -3,13 +3,22 @@ const path = require('path');
 const fs = require('fs');
 const { Sequelize, DataTypes } = require('sequelize');
 
-// ✅ 加载环境变量（只需一次）
-require('dotenv').config();
+// ✅ 加载环境变量（兼容从根目录或 backend 目录启动）
+const dotenv = require('dotenv');
+const rootEnvPath = path.resolve(__dirname, '../../.env');
+const backendEnvPath = path.resolve(__dirname, '../.env');
+if (fs.existsSync(rootEnvPath)) dotenv.config({ path: rootEnvPath });
+if (fs.existsSync(backendEnvPath)) dotenv.config({ path: backendEnvPath });
+dotenv.config();
 
-// MOCKED — in-memory database active by default (no MySQL server in container)
-// Set USE_REAL_DB=true with valid MySQL credentials to connect to a real database
-if (process.env.USE_REAL_DB !== 'true') {
-  console.warn('[AI Studio] Using in-memory mock database (set USE_REAL_DB=true for external MySQL)');
+// 默认在无 MySQL 配置的在线预览环境使用内存模拟数据库；
+// 本地只要配置了 DB_HOST 与 DB_NAME（且未显式设 USE_MOCK_DB=true），或显式设置 USE_REAL_DB=true，即自动连接真实 MySQL
+const useRealDb =
+  process.env.USE_REAL_DB === 'true' ||
+  (process.env.USE_MOCK_DB !== 'true' && Boolean(process.env.DB_HOST && process.env.DB_NAME));
+
+if (!useRealDb) {
+  console.warn('[DB] Using in-memory mock database (set USE_REAL_DB=true for MySQL)');
   const mockDb = require('./mockDb');
   mockDb.Sequelize = Sequelize;
   module.exports = mockDb;

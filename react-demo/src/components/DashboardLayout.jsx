@@ -1,5 +1,5 @@
 // src/components/DashboardLayout.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, createContext, useContext } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -22,9 +22,13 @@ const ROUTE_META = {
     section: '前台浏览',
     title: '产品查询'
   },
+  '/fccview': {
+    section: '前台浏览',
+    title: 'FCCID查询'
+  },
   '/productcatalog': {
     section: '前台浏览',
-    title: '产品目录'
+    title: 'FCCID查询'
   },
   '/products': {
     section: '后台管理',
@@ -41,7 +45,7 @@ const NAV_GROUPS = [
     label: '前台浏览',
     items: [
       { to: '/productview', label: '产品查询', icon: Search },
-      { to: '/productcatalog', label: '产品目录', icon: LayoutGrid }
+      { to: '/fccview', label: 'FCCID查询', icon: Radio }
     ]
   },
   {
@@ -53,10 +57,23 @@ const NAV_GROUPS = [
   }
 ];
 
+const FooterContext = createContext({
+  setFooterRight: () => {}
+});
+
+export function useFooterRight(text) {
+  const { setFooterRight } = useContext(FooterContext);
+  useEffect(() => {
+    setFooterRight(text || '');
+    return () => setFooterRight('');
+  }, [text, setFooterRight]);
+}
+
 export default function DashboardLayout({ children, pageTitle }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useUser();
+  const [footerRight, setFooterRight] = useState('');
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -71,10 +88,24 @@ export default function DashboardLayout({ children, pageTitle }) {
     location.pathname.startsWith('/products') ||
     location.pathname.startsWith('/fccs');
 
+  const visibleNavGroups = isAdminRoute
+    ? NAV_GROUPS
+    : NAV_GROUPS.filter((group) => group.label !== '后台管理');
+
+  const footerContextValue = useMemo(() => ({ setFooterRight }), []);
+
   // Close mobile drawer on route change
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
+
+  const isFccRoute =
+    location.pathname.startsWith('/fccview') ||
+    location.pathname.startsWith('/fccs');
+
+  const footerLeftText = isFccRoute
+    ? `© ${new Date().getFullYear()} FCC ID | 数据来源于网络收集`
+    : `© ${new Date().getFullYear()} 产品中心 | 所有产品信息来源于数据库`;
 
   // Close mobile drawer on Escape key
   useEffect(() => {
@@ -149,7 +180,7 @@ export default function DashboardLayout({ children, pageTitle }) {
           aria-label="主导航"
           className="flex-1 overflow-y-auto px-3 py-5 space-y-6"
         >
-          {NAV_GROUPS.map((group) => (
+          {visibleNavGroups.map((group) => (
             <div key={group.label}>
               {!collapsed && (
                 <p className="px-3 mb-2 text-xs font-medium text-slate-400 whitespace-nowrap">
@@ -349,9 +380,21 @@ export default function DashboardLayout({ children, pageTitle }) {
         </header>
 
         {/* Main Content Area */}
-        <main className="flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          {children || <Outlet />}
-        </main>
+        <FooterContext.Provider value={footerContextValue}>
+          <main className="flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            {children || <Outlet />}
+          </main>
+        </FooterContext.Provider>
+
+        {/* Unified Bottom Footer */}
+        <footer className="mt-auto shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 lg:px-8 py-5">
+          <div className="max-w-[1440px] mx-auto flex flex-col md:flex-row justify-between items-center gap-2">
+            <p className="text-sm text-gray-600">{footerLeftText}</p>
+            {footerRight && (
+              <div className="text-sm text-gray-500">{footerRight}</div>
+            )}
+          </div>
+        </footer>
       </div>
     </div>
   );

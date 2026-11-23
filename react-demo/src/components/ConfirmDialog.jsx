@@ -1,25 +1,66 @@
 import React from 'react';
+import { AlertTriangle, X } from 'lucide-react';
 
-const ConfirmDialog = ({ isOpen, message, onConfirm, onCancel }) => {
+const ConfirmDialog = ({
+  isOpen,
+  title = '确认操作',
+  message,
+  confirmText = '确认',
+  cancelText = '取消',
+  isDanger = true,
+  onConfirm,
+  onCancel
+}) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg p-6 max-w-sm w-1/3 mx-auto">
-        <h3 className="text-lg font-semibold mb-4">确认操作</h3>
-        <p className="text-gray-700 mb-6">{message}</p>
-        <div className="flex justify-end space-x-3">
+    <div
+      className="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center z-50 p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xl max-w-md w-full overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div
+              className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                isDanger ? 'bg-rose-50 text-rose-600' : 'bg-indigo-50 text-indigo-600'
+              }`}
+            >
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+          </div>
           <button
+            type="button"
             onClick={onCancel}
-            className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 transition-colors"
+            aria-label="关闭"
+            className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
           >
-            取消
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="px-6 py-5">
+          <p className="text-sm text-slate-600 leading-relaxed">{message}</p>
+        </div>
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-100 flex justify-end gap-2.5">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap"
+          >
+            {cancelText}
           </button>
           <button
+            type="button"
             onClick={onConfirm}
-            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+            className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors whitespace-nowrap ${
+              isDanger
+                ? 'bg-rose-600 hover:bg-rose-700'
+                : 'bg-indigo-600 hover:bg-indigo-700'
+            }`}
           >
-            确定
+            {confirmText}
           </button>
         </div>
       </div>
