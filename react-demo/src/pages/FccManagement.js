@@ -17,6 +17,7 @@ import AddProductToFccForm from '../components/AddProductToFccForm';
 import FccProductList from '../components/FccProductList';
 import { safeFetch } from '../utils/safeFetch';
 import { useFooterRight } from '../components/DashboardLayout';
+import { useDropdownOptions } from '../hooks/useDropdownOptions';
 import {
   formatMediaUrl,
   MediaThumb,
@@ -27,11 +28,14 @@ import {
   showAppToast,
   ProductDetailModal,
   FccControllerTabs,
-  FccDetailModal
+  FccDetailModal,
+  PaginationBar
 } from '../components/CatalogUI';
 
 // 保持对外导出兼容
 export const formatImageUrl = formatMediaUrl;
+
+const DEFAULT_PAGE_SIZE = 12;
 
 export default function FccManagement() {
   const { user, token, loading: isUserLoading } = useUser();
@@ -39,13 +43,27 @@ export default function FccManagement() {
 
   // FCC 管理状态
   const [fccs, setFccs] = useState([]);
-  useFooterRight(fccs.length > 0 ? `当前显示 ${fccs.length} 条 FCC 记录` : '');
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeSearch, setActiveSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 0
+  });
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingFcc, setEditingFcc] = useState(null);
+
+  useFooterRight(
+    pagination.total > 0
+      ? `第 ${pagination.page} / ${Math.max(1, pagination.totalPages)} 页 · 共 ${pagination.total} 条 FCC 记录`
+      : ''
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 记录下拉框是否处于自定义输入模式
@@ -88,34 +106,34 @@ export default function FccManagement() {
   const [preview, setPreview] = useState('');
   const [formErrors, setFormErrors] = useState({});
 
-  const BRAND_OPTIONS = [
-    { value: '', label: '请选择品牌' },
-    { value: 'Hunter', label: 'Hunter' },
-    { value: 'Harbor Breeze', label: 'Harbor Breeze' },
-    { value: 'Hampton Bay', label: 'Hampton Bay' },
-    { value: 'CoreBay', label: 'CoreBay' },
-    { value: 'Others', label: '其他 (Other)' }
-  ];
+  const { options: dbOptions, refreshOptions } = useDropdownOptions();
 
-  const PRODUCT_TYPE_OPTIONS = [
-    { value: '', label: '请选择产品类型' },
-    { value: 'Ceiling Fan', label: 'Ceiling Fan' },
-    { value: 'Control Kit', label: 'Control Kit' },
-    { value: 'Remote', label: 'Remote' },
-    { value: 'Receiver', label: 'Receiver' },
-    { value: 'Others', label: '其他 (Other)' }
-  ];
+  const BRAND_OPTIONS = useMemo(
+    () => [
+      { value: '', label: '请选择品牌' },
+      ...dbOptions.brand.map((o) => ({ value: o.value, label: o.label || o.value })),
+      { value: 'Others', label: '其他 (自定义)' }
+    ],
+    [dbOptions.brand]
+  );
 
-  const SPEED_OPTIONS = [
-    { value: '', label: '请选择 AC/DC 类型' },
-    { value: 'AC 3-speeds', label: 'AC 3-speeds' },
-    { value: 'AC 3-speeds with Reverse', label: 'AC 3-speeds with Reverse' },
-    { value: 'AC 4-speeds', label: 'AC 4-speeds' },
-    { value: 'AC 4-speeds with Reverse', label: 'AC 4-speeds with Reverse' },
-    { value: 'DC 6-speeds', label: 'DC 6-speeds' },
-    { value: 'DC 6-speeds with Reverse', label: 'DC 6-speeds with Reverse' },
-    { value: 'Others', label: '其他 (Other)' }
-  ];
+  const PRODUCT_TYPE_OPTIONS = useMemo(
+    () => [
+      { value: '', label: '请选择产品类型' },
+      ...dbOptions.productType.map((o) => ({ value: o.value, label: o.label || o.value })),
+      { value: 'Others', label: '其他 (自定义)' }
+    ],
+    [dbOptions.productType]
+  );
+
+  const SPEED_OPTIONS = useMemo(
+    () => [
+      { value: '', label: '请选择 AC/DC 类型' },
+      ...dbOptions.speed.map((o) => ({ value: o.value, label: o.label || o.value })),
+      { value: 'Others', label: '其他 (自定义)' }
+    ],
+    [dbOptions.speed]
+  );
 
   const getAuthHeaders = useCallback(() => {
     const headers = {};
@@ -125,11 +143,18 @@ export default function FccManagement() {
     return headers;
   }, [token]);
 
-  const fetchFccs = useCallback(async (search = '') => {
+  const fetchFccs = useCallback(async (search = '', targetPage = 1, targetPageSize = DEFAULT_PAGE_SIZE) => {
     setLoading(true);
     setError(null);
     try {
-      const url = search ? `${API_URL}?search=${encodeURIComponent(search)}` : API_URL;
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        pageSize: String(targetPageSize)
+      });
+      if (search.trim()) {
+        params.set('search', search.trim());
+      }
+      const url = `${API_URL}?${params.toString()}`;
       const res = await safeFetch(url, { headers: getAuthHeaders() });
 
       if (!res.ok) {
@@ -139,11 +164,33 @@ export default function FccManagement() {
       }
 
       const data = await res.json();
-      setFccs(Array.isArray(data) ? data : []);
+      if (Array.isArray(data)) {
+        setFccs(data);
+        setPagination({
+          page: 1,
+          pageSize: targetPageSize,
+          total: data.length,
+          totalPages: data.length > 0 ? Math.ceil(data.length / targetPageSize) : 0
+        });
+      } else {
+        const items = Array.isArray(data.items) ? data.items : [];
+        const nextPagination = data.pagination || {
+          page: targetPage,
+          pageSize: targetPageSize,
+          total: items.length,
+          totalPages: items.length > 0 ? 1 : 0
+        };
+        setFccs(items);
+        setPagination(nextPagination);
+        if (nextPagination.page && nextPagination.page !== targetPage) {
+          setPage(nextPagination.page);
+        }
+      }
     } catch (err) {
       console.error('获取FCC列表失败:', err);
       setError(err.message);
       setFccs([]);
+      setPagination({ page: 1, pageSize: targetPageSize, total: 0, totalPages: 0 });
       if (err.message.includes('认证') || err.message.includes('401')) {
         navigate('/login', { replace: true });
       }
@@ -153,25 +200,43 @@ export default function FccManagement() {
     }
   }, [API_URL, getAuthHeaders, navigate]);
 
+  const isAdmin = user?.role === 'admin';
+
   useEffect(() => {
     if (isUserLoading) return;
     if (!user && !token) {
       navigate('/login', { replace: true });
+      return;
+    }
+    if (user && user.role !== 'admin' && user.role !== 'editor') {
+      navigate('/productview', { replace: true });
     }
   }, [user, token, isUserLoading, navigate]);
 
   useEffect(() => {
-    if (isUserLoading || (!user && !token)) return;
-    if (searchTerm.trim() === '') {
-      fetchFccs();
+    const trimmed = searchTerm.trim();
+    if (trimmed === activeSearch) {
+      setSearching(false);
+      return;
+    }
+    if (trimmed === '') {
+      setSearching(false);
+      setActiveSearch('');
+      setPage(1);
       return;
     }
     setSearching(true);
     const timer = setTimeout(() => {
-      fetchFccs(searchTerm);
-    }, 450);
+      setActiveSearch(trimmed);
+      setPage(1);
+    }, 400);
     return () => clearTimeout(timer);
-  }, [searchTerm, fetchFccs, isUserLoading, user, token]);
+  }, [searchTerm, activeSearch]);
+
+  useEffect(() => {
+    if (isUserLoading || (!user && !token)) return;
+    fetchFccs(activeSearch, page, pageSize);
+  }, [activeSearch, page, pageSize, fetchFccs, isUserLoading, user, token]);
 
   const handleSearchChange = (e) => {
     const value = e.target.value;
@@ -181,7 +246,14 @@ export default function FccManagement() {
 
   const clearSearch = () => {
     setSearchTerm('');
+    setActiveSearch('');
+    setPage(1);
     setSearching(false);
+  };
+
+  const handlePageSizeChange = (nextSize) => {
+    setPageSize(nextSize);
+    setPage(1);
   };
 
   const fetchAvailableProducts = useCallback(async () => {
@@ -446,12 +518,17 @@ export default function FccManagement() {
         setFccs((prev) => prev.map((f) => (f.id === data.id ? { ...f, ...data } : f)));
         showAppToast('FCC 信息已更新', 'success');
       } else {
-        setFccs((prev) => [data, ...prev]);
         showAppToast('FCC 信息已添加', 'success');
       }
 
+      const isEditing = Boolean(editingFcc);
       toggleModal();
-      fetchFccs(searchTerm);
+      if (!isEditing && page !== 1) {
+        setPage(1);
+      } else {
+        fetchFccs(activeSearch, isEditing ? page : 1, pageSize);
+      }
+      refreshOptions();
     } catch (err) {
       console.error('操作失败:', err);
       showAppToast(`操作失败：${err.message}`, 'error');
@@ -498,6 +575,7 @@ export default function FccManagement() {
 
       setFccs((prev) => prev.filter((f) => f.id !== deleteId));
       showAppToast(`"${deleteTargetName}" 已删除`, 'success');
+      fetchFccs(activeSearch, page, pageSize);
     } catch (err) {
       console.error('删除失败:', err);
       showAppToast(`删除失败：${err.message}`, 'error');
@@ -516,11 +594,11 @@ export default function FccManagement() {
 
   const renderFccList = () => {
     if (loading) {
-      return <CardGridSkeleton count={6} />;
+      return <CardGridSkeleton count={Math.min(pageSize, 6)} />;
     }
 
     if (error) {
-      return <ErrorState message={error} onRetry={() => fetchFccs(searchTerm)} />;
+      return <ErrorState message={error} onRetry={() => fetchFccs(activeSearch, page, pageSize)} />;
     }
 
     if (fccs.length === 0) {
@@ -604,9 +682,9 @@ export default function FccManagement() {
               className="mt-auto"
             />
 
-            {/* 底部管理操作栏 */}
+            {/* 底部管理操作栏：管理员 4 按钮，编辑员 3 按钮（无删除权限） */}
             <div className="px-4 py-2.5 border-t border-slate-200/70 bg-white">
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5`}>
                 <button
                   type="button"
                   onClick={() => setDetailFcc(fcc)}
@@ -631,14 +709,16 @@ export default function FccManagement() {
                   <Pencil className="w-3.5 h-3.5 shrink-0" />
                   编辑
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteClick(fcc)}
-                  className="inline-flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-xs font-medium hover:bg-rose-50 transition-colors whitespace-nowrap"
-                >
-                  <Trash2 className="w-3.5 h-3.5 shrink-0" />
-                  删除
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteClick(fcc)}
+                    className="inline-flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-xs font-medium hover:bg-rose-50 transition-colors whitespace-nowrap"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                    删除
+                  </button>
+                )}
               </div>
             </div>
           </article>
@@ -710,11 +790,11 @@ export default function FccManagement() {
     );
   };
 
-  const subtitleText = searchTerm && !loading
-    ? `搜索 "${searchTerm}" · 共 ${fccs.length} 条记录`
+  const subtitleText = activeSearch && !loading
+    ? `搜索 "${activeSearch}" · 共 ${pagination.total} 条记录`
     : loading
       ? '正在同步 FCC ID 记录...'
-      : `共 ${fccs.length} 条 FCC 记录`;
+      : `共 ${pagination.total} 条 FCC 记录`;
 
   return (
     <div>
@@ -741,6 +821,19 @@ export default function FccManagement() {
       />
 
       {renderFccList()}
+
+      {!error && (
+        <PaginationBar
+          page={pagination.page}
+          pageSize={pageSize}
+          total={pagination.total}
+          totalPages={pagination.totalPages}
+          onPageChange={setPage}
+          onPageSizeChange={handlePageSizeChange}
+          loading={loading}
+          itemLabel="条 FCC 记录"
+        />
+      )}
 
       <ConfirmDialog
         isOpen={showDeleteDialog}

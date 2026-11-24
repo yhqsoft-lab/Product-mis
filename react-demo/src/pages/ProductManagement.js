@@ -1,5 +1,5 @@
 // src/pages/ProductManagement.js
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -19,6 +19,7 @@ import ProductRelationsManager from '../components/ProductRelationsManager';
 import { fetchWithAuth } from '../utils/fetchWithAuth';
 import { safeFetch } from '../utils/safeFetch';
 import { useFooterRight } from '../components/DashboardLayout';
+import { useDropdownOptions } from '../hooks/useDropdownOptions';
 import {
   formatMediaUrl,
   getStatusMeta,
@@ -29,26 +30,43 @@ import {
   ErrorState,
   showAppToast,
   ProductDetailModal,
-  ProductRelationModal
+  ProductRelationModal,
+  PaginationBar
 } from '../components/CatalogUI';
+
+const DEFAULT_PAGE_SIZE = 12;
 
 export default function ProductManagement() {
   const { user, token, loading: isUserLoading } = useUser();
   const navigate = useNavigate();
+
+  const isAdmin = user?.role === 'admin';
 
   // 权限校验
   useEffect(() => {
     if (isUserLoading) return;
     if (!user && !token) {
       navigate('/login', { replace: true });
+      return;
+    }
+    if (user && user.role !== 'admin' && user.role !== 'editor') {
+      navigate('/productview', { replace: true });
     }
   }, [user, token, isUserLoading, navigate]);
 
   // 页面状态
   const [products, setProducts] = useState([]);
-  useFooterRight(products.length > 0 ? `当前显示 ${products.length} 个产品` : '');
   const [allProducts, setAllProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeSearch, setActiveSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 0
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
@@ -56,6 +74,12 @@ export default function ProductManagement() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteId, setDeleteId] = useState(null);
   const [searching, setSearching] = useState(false);
+
+  useFooterRight(
+    pagination.total > 0
+      ? `第 ${pagination.page} / ${Math.max(1, pagination.totalPages)} 页 · 共 ${pagination.total} 个产品`
+      : ''
+  );
 
   // Relations 状态
   const [showRelationsModal, setShowRelationsModal] = useState(false);
@@ -126,30 +150,30 @@ export default function ProductManagement() {
   const BASE_URL = /^https?:\/\//i.test(rawApiBase) ? rawApiBase.replace(/\/+$/, '') : '';
   const API_PRODUCTS = `${BASE_URL}/api/products`;
 
-  const BRAND_OPTIONS = [
-    { value: '', label: '请选择品牌' },
-    { value: 'Hunter', label: 'Hunter' },
-    { value: 'Harbor Breeze', label: 'Harbor Breeze' },
-    { value: 'Hampton Bay', label: 'Hampton Bay' },
-    { value: 'CoreBay', label: 'CoreBay' },
-    { value: 'Others', label: '其他 (自定义)' }
-  ];
+  const { options: dbOptions, refreshOptions } = useDropdownOptions();
 
-  const PRODUCT_TYPE_OPTIONS = [
-    { value: '', label: '请选择产品类型' },
-    { value: 'Ceiling Fan', label: 'Ceiling Fan' },
-    { value: 'Control Kit', label: 'Control Kit' },
-    { value: 'Remote', label: 'Remote' },
-    { value: 'Receiver', label: 'Receiver' },
-    { value: 'Others', label: '其他 (自定义)' }
-  ];
+  const BRAND_OPTIONS = useMemo(
+    () => [
+      { value: '', label: '请选择品牌' },
+      ...dbOptions.brand.map((o) => ({ value: o.value, label: o.label || o.value })),
+      { value: 'Others', label: '其他 (自定义)' }
+    ],
+    [dbOptions.brand]
+  );
 
-  const STATUS_OPTIONS = [
-    { value: 'active', label: '在售' },
-    { value: 'clearance', label: '清仓' },
-    { value: 'development', label: '开发中' },
-    { value: 'discontinued', label: '停产' }
-  ];
+  const PRODUCT_TYPE_OPTIONS = useMemo(
+    () => [
+      { value: '', label: '请选择产品类型' },
+      ...dbOptions.productType.map((o) => ({ value: o.value, label: o.label || o.value })),
+      { value: 'Others', label: '其他 (自定义)' }
+    ],
+    [dbOptions.productType]
+  );
+
+  const STATUS_OPTIONS = useMemo(
+    () => dbOptions.status.map((o) => ({ value: o.value, label: o.label || o.value })),
+    [dbOptions.status]
+  );
 
   const fetchAllProducts = useCallback(async () => {
     try {
@@ -162,24 +186,51 @@ export default function ProductManagement() {
     }
   }, [API_PRODUCTS]);
 
-  const fetchProducts = useCallback(async (search = '') => {
+  const fetchProducts = useCallback(async (search = '', targetPage = 1, targetPageSize = DEFAULT_PAGE_SIZE) => {
     setLoading(true);
     setError(null);
     try {
-      const url = search
-        ? `${API_PRODUCTS}?search=${encodeURIComponent(search)}`
-        : API_PRODUCTS;
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        pageSize: String(targetPageSize)
+      });
+      if (search.trim()) {
+        params.set('search', search.trim());
+      }
+      const url = `${API_PRODUCTS}?${params.toString()}`;
       const res = await fetchWithAuth(url);
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      setProducts(Array.isArray(data) ? data : []);
+      if (Array.isArray(data)) {
+        setProducts(data);
+        setPagination({
+          page: 1,
+          pageSize: targetPageSize,
+          total: data.length,
+          totalPages: data.length > 0 ? Math.ceil(data.length / targetPageSize) : 0
+        });
+      } else {
+        const items = Array.isArray(data.items) ? data.items : [];
+        const nextPagination = data.pagination || {
+          page: targetPage,
+          pageSize: targetPageSize,
+          total: items.length,
+          totalPages: items.length > 0 ? 1 : 0
+        };
+        setProducts(items);
+        setPagination(nextPagination);
+        if (nextPagination.page && nextPagination.page !== targetPage) {
+          setPage(nextPagination.page);
+        }
+      }
     } catch (err) {
       console.error('❌ 获取产品失败:', err);
       setError(err.message);
       setProducts([]);
+      setPagination({ page: 1, pageSize: targetPageSize, total: 0, totalPages: 0 });
     } finally {
       setLoading(false);
       setSearching(false);
@@ -209,17 +260,29 @@ export default function ProductManagement() {
   }, []);
 
   useEffect(() => {
-    if (isUserLoading || (!user && !token)) return;
-    if (searchTerm.trim() === '') {
-      fetchProducts();
+    const trimmed = searchTerm.trim();
+    if (trimmed === activeSearch) {
+      setSearching(false);
+      return;
+    }
+    if (trimmed === '') {
+      setSearching(false);
+      setActiveSearch('');
+      setPage(1);
       return;
     }
     setSearching(true);
     const timer = setTimeout(() => {
-      fetchProducts(searchTerm);
-    }, 450);
+      setActiveSearch(trimmed);
+      setPage(1);
+    }, 400);
     return () => clearTimeout(timer);
-  }, [searchTerm, fetchProducts, isUserLoading, user, token]);
+  }, [searchTerm, activeSearch]);
+
+  useEffect(() => {
+    if (isUserLoading || (!user && !token)) return;
+    fetchProducts(activeSearch, page, pageSize);
+  }, [activeSearch, page, pageSize, fetchProducts, isUserLoading, user, token]);
 
   const handleSearchChange = (e) => {
     const value = e.target.value;
@@ -229,7 +292,14 @@ export default function ProductManagement() {
 
   const clearSearch = () => {
     setSearchTerm('');
+    setActiveSearch('');
+    setPage(1);
     setSearching(false);
+  };
+
+  const handlePageSizeChange = (nextSize) => {
+    setPageSize(nextSize);
+    setPage(1);
   };
 
   const handleImageChange = (e) => {
@@ -490,12 +560,17 @@ export default function ProductManagement() {
         setProducts((prev) => prev.map((p) => (p.id === data.id ? { ...p, ...data } : p)));
         showAppToast('产品更新成功', 'success');
       } else {
-        setProducts((prev) => [data, ...prev]);
         showAppToast('产品添加成功', 'success');
       }
       toggleModal();
-      fetchProducts(searchTerm);
+      const targetPage = isEditing ? page : 1;
+      if (!isEditing && page !== 1) {
+        setPage(1);
+      } else {
+        fetchProducts(activeSearch, targetPage, pageSize);
+      }
       fetchAllProducts();
+      refreshOptions();
     } catch (err) {
       console.error('💥 提交失败:', err);
       showAppToast(`操作失败：${err.message}`, 'error');
@@ -549,7 +624,7 @@ export default function ProductManagement() {
 
       setProducts((prev) => prev.filter((p) => p.id !== deleteId));
       showAppToast('产品已删除', 'success');
-      fetchProducts(searchTerm);
+      fetchProducts(activeSearch, page, pageSize);
       fetchAllProducts();
     } catch (err) {
       console.error('删除失败:', err);
@@ -565,20 +640,41 @@ export default function ProductManagement() {
     setShowDeleteDialog(true);
   };
 
-  const getRelatedProducts = (ids) => {
-    if (!ids || !Array.isArray(ids)) return [];
-    return ids
-      .map((id) => allProducts.find((p) => p.id === id))
-      .filter(Boolean);
-  };
+  const relatedProductMap = useMemo(() => {
+    const map = new Map();
+    allProducts.forEach((p) => {
+      if (p?.id != null) map.set(p.id, p);
+    });
+    products.forEach((p) => {
+      if (p?.id != null) map.set(p.id, p);
+      ['compatibleProducts', 'upgradeProducts', 'replacementProducts'].forEach((key) => {
+        if (Array.isArray(p?.[key])) {
+          p[key].forEach((rel) => {
+            if (rel?.id != null && !map.has(rel.id)) {
+              map.set(rel.id, rel);
+            }
+          });
+        }
+      });
+    });
+    return map;
+  }, [allProducts, products]);
+
+  const getRelatedProducts = useCallback(
+    (ids) => {
+      if (!ids || !Array.isArray(ids)) return [];
+      return ids.map((id) => relatedProductMap.get(id)).filter(Boolean);
+    },
+    [relatedProductMap]
+  );
 
   const renderProductList = () => {
     if (loading) {
-      return <CardGridSkeleton count={6} />;
+      return <CardGridSkeleton count={Math.min(pageSize, 6)} />;
     }
 
     if (error) {
-      return <ErrorState message={error} onRetry={() => fetchProducts(searchTerm)} />;
+      return <ErrorState message={error} onRetry={() => fetchProducts(activeSearch, page, pageSize)} />;
     }
 
     if (products.length === 0) {
@@ -766,9 +862,9 @@ export default function ProductManagement() {
                 </p>
               </div>
 
-              {/* 底部管理操作栏：整齐的 4 等分按钮 */}
+              {/* 底部管理操作栏：管理员 4 按钮，编辑员 3 按钮（无删除权限） */}
               <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/70 mt-auto">
-                <div className="grid grid-cols-4 gap-1.5">
+                <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5`}>
                   <button
                     type="button"
                     onClick={() => openDetailModal(product)}
@@ -793,14 +889,16 @@ export default function ProductManagement() {
                     <Pencil className="w-3.5 h-3.5 shrink-0" />
                     编辑
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteClick(product.id)}
-                    className="inline-flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-xs font-medium hover:bg-rose-50 transition-colors whitespace-nowrap"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
-                    删除
-                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteClick(product.id)}
+                      className="inline-flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-xs font-medium hover:bg-rose-50 transition-colors whitespace-nowrap"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                      删除
+                    </button>
+                  )}
                 </div>
               </div>
             </article>
@@ -810,11 +908,11 @@ export default function ProductManagement() {
     );
   };
 
-  const subtitleText = searchTerm && !loading
-    ? `搜索 "${searchTerm}" · 共 ${products.length} 个结果`
+  const subtitleText = activeSearch && !loading
+    ? `搜索 "${activeSearch}" · 共 ${pagination.total} 个结果`
     : loading
       ? '正在同步产品列表...'
-      : `共 ${products.length} 个产品`;
+      : `共 ${pagination.total} 个产品`;
 
   return (
     <div>
@@ -824,7 +922,7 @@ export default function ProductManagement() {
         searchTerm={searchTerm}
         onSearchChange={handleSearchChange}
         onClearSearch={clearSearch}
-        searchPlaceholder="输入 SKU、Model 或 FCC ID 搜索产品..."
+        searchPlaceholder="输入 SKU、Model、品牌或 FCC ID 搜索产品..."
         searching={searching}
         loading={loading}
         actionButton={
@@ -841,6 +939,19 @@ export default function ProductManagement() {
       />
 
       {renderProductList()}
+
+      {!error && (
+        <PaginationBar
+          page={pagination.page}
+          pageSize={pageSize}
+          total={pagination.total}
+          totalPages={pagination.totalPages}
+          onPageChange={setPage}
+          onPageSizeChange={handlePageSizeChange}
+          loading={loading}
+          itemLabel="个产品"
+        />
+      )}
 
       <ConfirmDialog
         isOpen={showDeleteDialog}
@@ -1236,7 +1347,7 @@ export default function ProductManagement() {
           product={selectedProductForRelations}
           onClose={closeRelationsModal}
           onSave={() => {
-            fetchProducts(searchTerm);
+            fetchProducts(activeSearch, page, pageSize);
             fetchAllProducts();
           }}
           apiUrl="/api/products"
@@ -1251,13 +1362,15 @@ export default function ProductManagement() {
         initialTab={relationModalState.initialTab}
         getRelatedProducts={getRelatedProducts}
         baseUrl={BASE_URL}
-        onSelectProduct={(p) => {
+        onSelectProduct={(p, label) => {
           closeRelationModal();
           const target = document.getElementById(`product-${p.id}`);
           if (target) {
             target.scrollIntoView({ behavior: 'smooth', block: 'center' });
             target.classList.add('ring-2', 'ring-indigo-500');
             setTimeout(() => target.classList.remove('ring-2', 'ring-indigo-500'), 2000);
+          } else {
+            openDetailModal(p, label);
           }
         }}
       />

@@ -85,9 +85,14 @@ export default function LoginPage() {
         setConfirmPassword('');
       } else {
         // 登录逻辑（复用 useUser 的 login，自动处理 Token 存储与状态更新）
-        await login({ username: username.trim(), password });
+        const loginResult = await login({ username: username.trim(), password });
+        const loggedRole = loginResult?.user?.role;
         success('登录成功');
-        navigate('/products', { replace: true }); // 可改为 /fccs
+        if (loggedRole === 'admin' || loggedRole === 'editor') {
+          navigate('/products', { replace: true });
+        } else {
+          navigate('/productview', { replace: true });
+        }
       }
     } catch (err) {
       const msg = err.message || '操作失败，请稍后重试';

@@ -33,10 +33,17 @@ router.post('/heartbeat', authMiddleware, checkActivityMiddleware, authControlle
 router.get('/me', authMiddleware, checkActivityMiddleware, authController.getCurrentUser);    // ✅ 挂载活动检测
 router.get('/session', authMiddleware, authController.checkSession);
 router.put('/profile', authMiddleware, authController.updateProfile);
+router.put('/password', authMiddleware, authController.changePassword);
 router.post('/logout', authMiddleware, authController.logout);
 
-// 👑 管理员路由
-// ⚠️ 移除 adminMiddleware：初始系统无 admin，由 Controller 内部校验是否允许创建
+// 👑 管理员路由：账号与角色管理
+router.get('/users', authMiddleware, adminMiddleware, authController.listUsers);
+router.post('/users', authMiddleware, adminMiddleware, authController.createUser);
+router.put('/users/:id', authMiddleware, adminMiddleware, authController.updateUser);
+router.put('/users/:id/password', authMiddleware, adminMiddleware, authController.adminResetPassword);
+router.delete('/users/:id', authMiddleware, adminMiddleware, authController.deleteUser);
+
+// ⚠️ 初始管理员创建接口（仅开发环境）
 router.post('/init-admin', authController.initAdmin);
 
 // 🩺 健康检查

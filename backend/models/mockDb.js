@@ -7,6 +7,8 @@ const now = () => new Date();
 
 // Seed users (default admin: admin / Admin123!)
 const defaultPasswordHash = bcrypt.hashSync('Admin123!', 10);
+const editorPasswordHash = bcrypt.hashSync('Editor123!', 10);
+const memberPasswordHash = bcrypt.hashSync('Member123!', 10);
 
 const usersData = [
   {
@@ -20,9 +22,33 @@ const usersData = [
     lastActivity: now(),
     createdAt: now(),
     updatedAt: now()
+  },
+  {
+    id: 2,
+    username: 'editor',
+    password: editorPasswordHash,
+    email: 'editor@example.com',
+    role: 'editor',
+    isActive: true,
+    refreshToken: null,
+    lastActivity: now(),
+    createdAt: now(),
+    updatedAt: now()
+  },
+  {
+    id: 3,
+    username: 'member',
+    password: memberPasswordHash,
+    email: 'member@example.com',
+    role: 'user',
+    isActive: true,
+    refreshToken: null,
+    lastActivity: now(),
+    createdAt: now(),
+    updatedAt: now()
   }
 ];
-let nextUserId = 2;
+let nextUserId = 4;
 
 // Seed products referencing existing uploaded assets in backend/public/uploads
 const productsData = [
@@ -132,6 +158,10 @@ const productRelations = [
   { source_product_id: 2, target_product_id: 1, relation_type: 'compatible' }
 ];
 
+// Dropdown options table (initialized by OptionController.syncInitialOptions on server start)
+const dropdownOptionsData = [];
+let nextDropdownOptionId = 1;
+
 function matchesCondition(recordValue, cond) {
   if (cond === null || cond === undefined) return recordValue === cond;
   if (typeof cond === 'object' && !(cond instanceof Date)) {
@@ -143,7 +173,12 @@ function matchesCondition(recordValue, cond) {
       } else if (sym === Op.ne) {
         if (String(recordValue) === String(cond[sym])) return false;
       } else if (sym === Op.in) {
-        if (!Array.isArray(cond[sym]) || !cond[sym].includes(recordValue)) return false;
+        if (
+          !Array.isArray(cond[sym]) ||
+          !cond[sym].some((item) => String(item) === String(recordValue))
+        ) {
+          return false;
+        }
       }
     }
     return true;
@@ -196,6 +231,10 @@ function wrapUser(raw) {
       Object.assign(raw, vals, { updatedAt: now() });
       Object.assign(this, raw);
       return this;
+    },
+    async destroy() {
+      const idx = usersData.findIndex((u) => u.id === raw.id);
+      if (idx !== -1) usersData.splice(idx, 1);
     },
     toJSON() {
       return { ...raw };
@@ -293,6 +332,25 @@ function wrapFcc(raw, extras = {}) {
 
 const User = {
   name: 'User',
+  async findAll({ where, attributes, order, limit, offset } = {}) {
+    let list = usersData.filter((u) => matchesWhere(u, where));
+    if (order && order[0]) {
+      const [col, dir] = order[0];
+      list = [...list].sort((a, b) =>
+        dir === 'DESC' ? (b[col] > a[col] ? 1 : -1) : (a[col] > b[col] ? 1 : -1)
+      );
+    }
+    const start = Number.isInteger(offset) && offset > 0 ? offset : 0;
+    if (Number.isInteger(limit) && limit >= 0) {
+      list = list.slice(start, start + limit);
+    } else if (start > 0) {
+      list = list.slice(start);
+    }
+    return list.map((u) => wrapUser(pickAttributes(u, attributes)));
+  },
+  async count({ where } = {}) {
+    return usersData.filter((u) => matchesWhere(u, where)).length;
+  },
   async findOne({ where, attributes } = {}) {
     const found = usersData.find((u) => matchesWhere(u, where));
     return found ? wrapUser(pickAttributes(found, attributes)) : null;
@@ -337,27 +395,41 @@ const User = {
 
 const Product = {
   name: 'Product',
-  async findAll({ where, limit, include, order } = {}) {
+  async count({ where } = {}) {
+    return productsData.filter((p) => matchesWhere(p, where)).length;
+  },
+  async findAll({ where, attributes, limit, offset, include, order } = {}) {
     let list = productsData.filter((p) => matchesWhere(p, where));
     if (order && order[0]) {
       const [col, dir] = order[0];
       list = [...list].sort((a, b) => (dir === 'DESC' ? (b[col] > a[col] ? 1 : -1) : (a[col] > b[col] ? 1 : -1)));
     }
-    if (limit) list = list.slice(0, limit);
+    const start = Number.isInteger(offset) && offset > 0 ? offset : 0;
+    if (Number.isInteger(limit) && limit >= 0) {
+      list = list.slice(start, start + limit);
+    } else if (start > 0) {
+      list = list.slice(start);
+    }
     return list.map((p) => {
       const extras = {};
       if (Array.isArray(include)) {
         for (const inc of include) {
           if (inc.as === 'compatibleProducts') {
-            extras.compatibleProducts = getRelated(p.id, 'compatible').map((r) => ({ id: r.id }));
+            extras.compatibleProducts = getRelated(p.id, 'compatible').map((r) =>
+              pickAttributes(r, inc.attributes)
+            );
           } else if (inc.as === 'upgradeProducts') {
-            extras.upgradeProducts = getRelated(p.id, 'upgrade').map((r) => ({ id: r.id }));
+            extras.upgradeProducts = getRelated(p.id, 'upgrade').map((r) =>
+              pickAttributes(r, inc.attributes)
+            );
           } else if (inc.as === 'replacementProducts') {
-            extras.replacementProducts = getRelated(p.id, 'replacement').map((r) => ({ id: r.id }));
+            extras.replacementProducts = getRelated(p.id, 'replacement').map((r) =>
+              pickAttributes(r, inc.attributes)
+            );
           }
         }
       }
-      return wrapProduct(p, extras);
+      return wrapProduct(pickAttributes(p, attributes), extras);
     });
   },
   async findOne({ where } = {}) {
@@ -391,11 +463,20 @@ const Product = {
 
 const Fcc = {
   name: 'Fcc',
-  async findAll({ where, include, order } = {}) {
+  async count({ where } = {}) {
+    return fccsData.filter((f) => matchesWhere(f, where)).length;
+  },
+  async findAll({ where, attributes, limit, offset, include, order } = {}) {
     let list = fccsData.filter((f) => matchesWhere(f, where));
     if (order && order[0]) {
       const [col, dir] = order[0];
       list = [...list].sort((a, b) => (dir === 'DESC' ? (b[col] > a[col] ? 1 : -1) : (a[col] > b[col] ? 1 : -1)));
+    }
+    const start = Number.isInteger(offset) && offset > 0 ? offset : 0;
+    if (Number.isInteger(limit) && limit >= 0) {
+      list = list.slice(start, start + limit);
+    } else if (start > 0) {
+      list = list.slice(start);
     }
     const includeProducts =
       Array.isArray(include) && include.some((inc) => inc.as === 'Products' || inc.model === Product);
@@ -405,7 +486,7 @@ const Fcc = {
         const pids = fccProductsLinks.filter((l) => l.fccId === f.id).map((l) => l.productId);
         extras.Products = productsData.filter((p) => pids.includes(p.id)).map((p) => ({ ...p }));
       }
-      return wrapFcc(f, extras);
+      return wrapFcc(pickAttributes(f, attributes), extras);
     });
   },
   async findByPk(id, { include } = {}) {
@@ -439,6 +520,88 @@ const Fcc = {
   }
 };
 
+function compareByOrder(a, b, order) {
+  if (!Array.isArray(order) || order.length === 0) return 0;
+  for (const [col, dir] of order) {
+    const va = a[col];
+    const vb = b[col];
+    if (va === vb) continue;
+    const asc = String(dir || 'ASC').toUpperCase() !== 'DESC';
+    if (typeof va === 'number' && typeof vb === 'number') {
+      return asc ? va - vb : vb - va;
+    }
+    const sa = String(va ?? '');
+    const sb = String(vb ?? '');
+    if (sa < sb) return asc ? -1 : 1;
+    if (sa > sb) return asc ? 1 : -1;
+  }
+  return 0;
+}
+
+function wrapDropdownOption(raw) {
+  if (!raw) return null;
+  return Object.assign(Object.create({
+    get() {
+      return { ...raw };
+    },
+    toJSON() {
+      return { ...raw };
+    },
+    async update(vals) {
+      Object.assign(raw, vals, { updatedAt: now() });
+      Object.assign(this, raw);
+      return this;
+    },
+    async destroy() {
+      const idx = dropdownOptionsData.findIndex((o) => o.id === raw.id);
+      if (idx !== -1) dropdownOptionsData.splice(idx, 1);
+    }
+  }), raw);
+}
+
+const DropdownOption = {
+  name: 'DropdownOption',
+  async count({ where } = {}) {
+    return dropdownOptionsData.filter((o) => matchesWhere(o, where)).length;
+  },
+  async findAll({ where, attributes, order, limit, offset } = {}) {
+    let list = dropdownOptionsData.filter((o) => matchesWhere(o, where));
+    if (Array.isArray(order) && order.length > 0) {
+      list = [...list].sort((a, b) => compareByOrder(a, b, order));
+    }
+    const start = Number.isInteger(offset) && offset > 0 ? offset : 0;
+    if (Number.isInteger(limit) && limit >= 0) {
+      list = list.slice(start, start + limit);
+    } else if (start > 0) {
+      list = list.slice(start);
+    }
+    return list.map((o) => wrapDropdownOption(pickAttributes(o, attributes)));
+  },
+  async findOne({ where } = {}) {
+    const found = dropdownOptionsData.find((o) => matchesWhere(o, where));
+    return found ? wrapDropdownOption(found) : null;
+  },
+  async findByPk(id) {
+    const found = dropdownOptionsData.find((o) => String(o.id) === String(id));
+    return found ? wrapDropdownOption(found) : null;
+  },
+  async create(data) {
+    const record = {
+      id: nextDropdownOptionId++,
+      category: data.category,
+      value: data.value,
+      label: data.label || data.value,
+      description: data.description || null,
+      sortOrder: Number.isInteger(Number(data.sortOrder)) ? Number(data.sortOrder) : 0,
+      isActive: data.isActive !== undefined ? Boolean(data.isActive) : true,
+      createdAt: now(),
+      updatedAt: now()
+    };
+    dropdownOptionsData.push(record);
+    return wrapDropdownOption(record);
+  }
+};
+
 const ProductWorkWith = {
   name: 'ProductWorkWith',
   async findAll() {
@@ -467,7 +630,8 @@ const sequelize = {
         { Tables_in_mock: 'products' },
         { Tables_in_mock: 'fccs' },
         { Tables_in_mock: 'fcc_products' },
-        { Tables_in_mock: 'product_relations' }
+        { Tables_in_mock: 'product_relations' },
+        { Tables_in_mock: 'dropdown_options' }
       ]];
     }
     if (normalized.startsWith('DELETE FROM PRODUCT_RELATIONS')) {
@@ -498,6 +662,7 @@ module.exports = {
   User,
   Product,
   Fcc,
+  DropdownOption,
   ProductWorkWith,
   sequelize
 };

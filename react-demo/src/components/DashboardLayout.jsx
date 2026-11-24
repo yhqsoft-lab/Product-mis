@@ -3,9 +3,11 @@ import React, { useState, useEffect, useMemo, createContext, useContext } from '
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Search,
-  LayoutGrid,
   Package,
   Radio,
+  Users,
+  KeyRound,
+  SlidersHorizontal,
   Menu,
   X,
   PanelLeftClose,
@@ -16,6 +18,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { useUser } from '../context/useUser';
+import ChangePasswordModal from './ChangePasswordModal';
 
 const ROUTE_META = {
   '/productview': {
@@ -37,6 +40,14 @@ const ROUTE_META = {
   '/fccs': {
     section: '后台管理',
     title: 'FCCID管理'
+  },
+  '/options': {
+    section: '后台管理',
+    title: '下拉选项管理'
+  },
+  '/users': {
+    section: '后台管理',
+    title: '账号与角色管理'
   }
 };
 
@@ -51,8 +62,10 @@ const NAV_GROUPS = [
   {
     label: '后台管理',
     items: [
-      { to: '/products', label: '产品管理', icon: Package },
-      { to: '/fccs', label: 'FCCID管理', icon: Radio }
+      { to: '/products', label: '产品管理', icon: Package, roles: ['admin', 'editor'] },
+      { to: '/fccs', label: 'FCCID管理', icon: Radio, roles: ['admin', 'editor'] },
+      { to: '/options', label: '下拉选项', icon: SlidersHorizontal, roles: ['admin', 'editor'] },
+      { to: '/users', label: '账号与角色', icon: Users, roles: ['admin'] }
     ]
   }
 ];
@@ -77,6 +90,7 @@ export default function DashboardLayout({ children, pageTitle }) {
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const currentMeta = ROUTE_META[location.pathname] || {
     section: '工作台',
@@ -84,13 +98,23 @@ export default function DashboardLayout({ children, pageTitle }) {
   };
 
   const displayTitle = pageTitle || currentMeta.title;
+  const canAccessAdmin = user?.role === 'admin' || user?.role === 'editor';
   const isAdminRoute =
     location.pathname.startsWith('/products') ||
-    location.pathname.startsWith('/fccs');
+    location.pathname.startsWith('/fccs') ||
+    location.pathname.startsWith('/options') ||
+    location.pathname.startsWith('/users');
 
-  const visibleNavGroups = isAdminRoute
-    ? NAV_GROUPS
-    : NAV_GROUPS.filter((group) => group.label !== '后台管理');
+  const visibleNavGroups = useMemo(() => {
+    return NAV_GROUPS.map((group) => {
+      if (group.label !== '后台管理') return group;
+      if (!isAdminRoute || !canAccessAdmin) return null;
+      const items = group.items.filter(
+        (item) => !item.roles || item.roles.includes(user?.role)
+      );
+      return items.length > 0 ? { ...group, items } : null;
+    }).filter(Boolean);
+  }, [isAdminRoute, canAccessAdmin, user?.role]);
 
   const footerContextValue = useMemo(() => ({ setFooterRight }), []);
 
@@ -254,15 +278,26 @@ export default function DashboardLayout({ children, pageTitle }) {
                   </div>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={logout}
-                title="退出登录"
-                aria-label="退出登录"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
+              <div className={`flex items-center shrink-0 ${collapsed ? 'flex-col gap-1' : 'gap-1'}`}>
+                <button
+                  type="button"
+                  onClick={() => setShowChangePassword(true)}
+                  title="修改密码"
+                  aria-label="修改密码"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+                >
+                  <KeyRound className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={logout}
+                  title="退出登录"
+                  aria-label="退出登录"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           ) : (
             <Link
@@ -358,6 +393,17 @@ export default function DashboardLayout({ children, pageTitle }) {
               </span>
             )}
 
+            {user && (
+              <button
+                type="button"
+                onClick={() => setShowChangePassword(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 hover:text-indigo-700 transition-colors duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+              >
+                <KeyRound className="h-4 w-4 text-slate-500" />
+                <span>修改密码</span>
+              </button>
+            )}
+
             {isAdminRoute ? (
               <button
                 type="button"
@@ -367,15 +413,23 @@ export default function DashboardLayout({ children, pageTitle }) {
                 <ExternalLink className="h-4 w-4 text-slate-500" />
                 <span>前台预览</span>
               </button>
-            ) : (
+            ) : canAccessAdmin ? (
               <button
                 type="button"
-                onClick={() => navigate(user ? '/products' : '/login')}
+                onClick={() => navigate('/products')}
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2"
               >
-                <span>{user ? '管理控制台' : '后台登录'}</span>
+                <span>管理控制台</span>
               </button>
-            )}
+            ) : !user ? (
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2"
+              >
+                <span>后台登录</span>
+              </button>
+            ) : null}
           </div>
         </header>
 
@@ -396,6 +450,12 @@ export default function DashboardLayout({ children, pageTitle }) {
           </div>
         </footer>
       </div>
+
+      <ChangePasswordModal
+        isOpen={showChangePassword}
+        onClose={() => setShowChangePassword(false)}
+        username={user?.username || ''}
+      />
     </div>
   );
 }

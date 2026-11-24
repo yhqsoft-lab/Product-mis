@@ -2,12 +2,72 @@
 const { Op } = require('sequelize');
 const fs = require('fs/promises');
 const path = require('path');
-const { Product } = require('../models');
-const { sequelize } = require('../models');
+const { Product, DropdownOption, sequelize } = require('../models');
+const { ensureOptionExists } = require('./OptionController');
 
-// 获取所有产品（支持模糊搜索）
+const parsePaginationParams = (query, defaultPageSize = 12, maxPageSize = 100) => {
+  const hasPagination =
+    query.page !== undefined || query.pageSize !== undefined || query.limit !== undefined;
+  const rawPage = Number.parseInt(query.page, 10);
+  const rawSize = Number.parseInt(query.pageSize ?? query.limit, 10);
+  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+  const pageSize =
+    Number.isInteger(rawSize) && rawSize > 0
+      ? Math.min(rawSize, maxPageSize)
+      : defaultPageSize;
+  return { hasPagination, page, pageSize };
+};
+
+const RELATED_PRODUCT_ATTRIBUTES = [
+  'id',
+  'sku',
+  'model',
+  'brand',
+  'productfccId',
+  'productType',
+  'description',
+  'httpLink',
+  'status',
+  'manual',
+  'image'
+];
+
+const buildProductIncludes = () => [
+  {
+    model: Product,
+    as: 'compatibleProducts',
+    attributes: RELATED_PRODUCT_ATTRIBUTES,
+    through: { attributes: [] }
+  },
+  {
+    model: Product,
+    as: 'upgradeProducts',
+    attributes: RELATED_PRODUCT_ATTRIBUTES,
+    through: { attributes: [] }
+  },
+  {
+    model: Product,
+    as: 'replacementProducts',
+    attributes: RELATED_PRODUCT_ATTRIBUTES,
+    through: { attributes: [] }
+  }
+];
+
+const formatProductList = (products) =>
+  products.map((p) => {
+    const plain = p.get({ plain: true });
+    return {
+      ...plain,
+      compatibleIds: plain.compatibleProducts?.map((cp) => cp.id) || [],
+      upgradeIds: plain.upgradeProducts?.map((cp) => cp.id) || [],
+      replacementIds: plain.replacementProducts?.map((rp) => rp.id) || []
+    };
+  });
+
+// 获取产品列表（支持模糊搜索与服务端分页）
 exports.getProducts = async (req, res) => {
-  const { search } = req.query;
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const { hasPagination, page, pageSize } = parsePaginationParams(req.query, 12, 100);
 
   try {
     const where = {};
@@ -16,54 +76,69 @@ exports.getProducts = async (req, res) => {
         { model: { [Op.like]: `%${search}%` } },
         { sku: { [Op.like]: `%${search}%` } },
         { brand: { [Op.like]: `%${search}%` } },
-        { productfccId: { [Op.like]: `%${search}%` } },
+        { productfccId: { [Op.like]: `%${search}%` } }
       ];
     }
 
+    if (hasPagination) {
+      const total = await Product.count({ where });
+      const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+      const safePage = totalPages > 0 ? Math.min(page, totalPages) : 1;
+      const offset = (safePage - 1) * pageSize;
+
+      let products = [];
+      if (total > 0) {
+        const idRows = await Product.findAll({
+          where,
+          attributes: ['id'],
+          order: [['id', 'DESC']],
+          limit: pageSize,
+          offset
+        });
+        const pageIds = idRows.map((row) => row.id);
+        if (pageIds.length > 0) {
+          products = await Product.findAll({
+            where: { id: { [Op.in]: pageIds } },
+            include: buildProductIncludes(),
+            order: [['id', 'DESC']]
+          });
+        }
+      }
+
+      return res.status(200).json({
+        items: formatProductList(products),
+        pagination: {
+          page: safePage,
+          pageSize,
+          total,
+          totalPages
+        }
+      });
+    }
+
+    // 兼容未传分页参数的调用方（如关系选择器），上限保护 500 条
     const products = await Product.findAll({
       where,
-      limit: 50, // 👈 紧急修复：加上硬限制！每次最多只返回 50 条记录
-      include: [
-        {
-          model: Product,
-          as: 'compatibleProducts',
-          attributes: ['id'],
-          through: { attributes: [] }
-        },
-        {
-          model: Product,
-          as: 'upgradeProducts',
-          attributes: ['id'],
-          through: { attributes: [] }
-        },
-        {
-          model: Product,
-          as: 'replacementProducts',
-          attributes: ['id'],
-          through: { attributes: [] }
-        }
-      ],
+      limit: 500,
+      include: buildProductIncludes(),
       order: [['id', 'DESC']]
     });
 
-    const formattedProducts = products.map(p => {
-      const plain = p.get({ plain: true });
-      return {
-        ...plain,
-        compatibleIds: plain.compatibleProducts?.map(cp => cp.id) || [],
-        upgradeIds: plain.upgradeProducts?.map(cp => cp.id) || [],
-        replacementIds: plain.replacementProducts?.map(rp => rp.id) || []
-      };
-    });
-
-    res.status(200).json(formattedProducts);
+    res.status(200).json(formatProductList(products));
   } catch (err) {
     console.error('获取产品列表失败:', err);
     res.status(500).json({ message: '服务器内部错误' });
   }
 };
 
-const ALLOWED_STATUSES = ['active', 'discontinued', 'development', 'clearance'];
+const isValidProductStatus = async (statusValue) => {
+  if (!statusValue) return false;
+  if (!DropdownOption) return true;
+  const matched = await DropdownOption.findOne({
+    where: { category: 'status', value: statusValue }
+  });
+  return Boolean(matched);
+};
 
 const cleanupUploadedFiles = async (files) => {
   if (!files) return;
@@ -114,7 +189,7 @@ exports.createProduct = async (req, res) => {
       await cleanupUploadedFiles(req.files);
       return res.status(400).json({ success: false, message: '完美替代型号（FCC ID）不能为空' });
     }
-    if (!ALLOWED_STATUSES.includes(status)) {
+    if (!(await isValidProductStatus(status))) {
       await cleanupUploadedFiles(req.files);
       return res.status(400).json({ success: false, message: '无效的产品销售状态' });
     }
@@ -163,6 +238,12 @@ exports.createProduct = async (req, res) => {
       manual: manualPath,
       image: imagePath
     });
+
+    // 自动将新输入的品牌/产品类型写入数据库下拉选项表
+    await Promise.all([
+      ensureOptionExists('brand', brand),
+      ensureOptionExists('productType', productType)
+    ]);
 
     const plain = newProduct.toJSON ? newProduct.toJSON() : newProduct;
     res.status(201).json({
@@ -219,7 +300,7 @@ exports.updateProduct = async (req, res) => {
       await cleanupUploadedFiles(req.files);
       return res.status(400).json({ success: false, message: '完美替代型号（FCC ID）不能为空' });
     }
-    if (!ALLOWED_STATUSES.includes(statusValue)) {
+    if (!(await isValidProductStatus(statusValue))) {
       await cleanupUploadedFiles(req.files);
       return res.status(400).json({ success: false, message: '无效的产品销售状态' });
     }
@@ -297,6 +378,12 @@ exports.updateProduct = async (req, res) => {
       image: imagePath,
       manual: manualPath
     });
+
+    // 自动将新输入的品牌/产品类型写入数据库下拉选项表
+    await Promise.all([
+      ensureOptionExists('brand', brand),
+      ensureOptionExists('productType', productType)
+    ]);
 
     res.json(product);
   } catch (err) {

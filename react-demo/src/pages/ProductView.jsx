@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   ExternalLink,
   FileText,
@@ -15,17 +15,34 @@ import {
   EmptyState,
   ErrorState,
   ProductDetailModal,
-  ProductRelationModal
+  ProductRelationModal,
+  PaginationBar
 } from '../components/CatalogUI';
+
+const DEFAULT_PAGE_SIZE = 12;
 
 export default function ProductSearch() {
   const [products, setProducts] = useState([]);
-  useFooterRight(products.length > 0 ? `当前显示 ${products.length} 个产品` : '');
   const [allProducts, setAllProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeSearch, setActiveSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 0
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searching, setSearching] = useState(false);
+
+  useFooterRight(
+    pagination.total > 0
+      ? `第 ${pagination.page} / ${Math.max(1, pagination.totalPages)} 页 · 共 ${pagination.total} 个产品`
+      : ''
+  );
 
   // 关联产品查看状态（统一 Tab 弹窗）
   const [relationModalState, setRelationModalState] = useState({
@@ -79,13 +96,18 @@ export default function ProductSearch() {
     }
   }, [API_PRODUCTS]);
 
-  const fetchProducts = useCallback(async (search = '') => {
+  const fetchProducts = useCallback(async (search = '', targetPage = 1, targetPageSize = DEFAULT_PAGE_SIZE) => {
     setLoading(true);
     setError(null);
     try {
-      const url = search
-        ? `${API_PRODUCTS}?search=${encodeURIComponent(search)}`
-        : API_PRODUCTS;
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        pageSize: String(targetPageSize)
+      });
+      if (search.trim()) {
+        params.set('search', search.trim());
+      }
+      const url = `${API_PRODUCTS}?${params.toString()}`;
 
       const res = await safeFetch(url);
       if (!res.ok) {
@@ -94,11 +116,33 @@ export default function ProductSearch() {
       }
 
       const data = await res.json();
-      setProducts(Array.isArray(data) ? data : []);
+      if (Array.isArray(data)) {
+        setProducts(data);
+        setPagination({
+          page: 1,
+          pageSize: targetPageSize,
+          total: data.length,
+          totalPages: data.length > 0 ? Math.ceil(data.length / targetPageSize) : 0
+        });
+      } else {
+        const items = Array.isArray(data.items) ? data.items : [];
+        const nextPagination = data.pagination || {
+          page: targetPage,
+          pageSize: targetPageSize,
+          total: items.length,
+          totalPages: items.length > 0 ? 1 : 0
+        };
+        setProducts(items);
+        setPagination(nextPagination);
+        if (nextPagination.page && nextPagination.page !== targetPage) {
+          setPage(nextPagination.page);
+        }
+      }
     } catch (err) {
       console.error('❌ 获取产品失败:', err);
       setError(err.message);
       setProducts([]);
+      setPagination({ page: 1, pageSize: targetPageSize, total: 0, totalPages: 0 });
     } finally {
       setLoading(false);
       setSearching(false);
@@ -109,19 +153,32 @@ export default function ProductSearch() {
     fetchAllProducts();
   }, [fetchAllProducts]);
 
+  // 搜索防抖：关键词变化时重置至第 1 页
   useEffect(() => {
-    if (searchTerm.trim() === '') {
-      fetchProducts();
+    const trimmed = searchTerm.trim();
+    if (trimmed === activeSearch) {
+      setSearching(false);
+      return;
+    }
+    if (trimmed === '') {
+      setSearching(false);
+      setActiveSearch('');
+      setPage(1);
       return;
     }
 
     setSearching(true);
     const timer = setTimeout(() => {
-      fetchProducts(searchTerm);
-    }, 450);
+      setActiveSearch(trimmed);
+      setPage(1);
+    }, 400);
 
     return () => clearTimeout(timer);
-  }, [searchTerm, fetchProducts]);
+  }, [searchTerm, activeSearch]);
+
+  useEffect(() => {
+    fetchProducts(activeSearch, page, pageSize);
+  }, [activeSearch, page, pageSize, fetchProducts]);
 
   const handleSearchChange = (e) => {
     const value = e.target.value;
@@ -133,23 +190,51 @@ export default function ProductSearch() {
 
   const clearSearch = () => {
     setSearchTerm('');
+    setActiveSearch('');
+    setPage(1);
     setSearching(false);
   };
 
-  const getRelatedProducts = (ids) => {
-    if (!ids || !Array.isArray(ids)) return [];
-    return ids
-      .map((id) => allProducts.find((p) => p.id === id))
-      .filter(Boolean);
+  const handlePageSizeChange = (nextSize) => {
+    setPageSize(nextSize);
+    setPage(1);
   };
+
+  const relatedProductMap = useMemo(() => {
+    const map = new Map();
+    allProducts.forEach((p) => {
+      if (p?.id != null) map.set(p.id, p);
+    });
+    products.forEach((p) => {
+      if (p?.id != null) map.set(p.id, p);
+      ['compatibleProducts', 'upgradeProducts', 'replacementProducts'].forEach((key) => {
+        if (Array.isArray(p?.[key])) {
+          p[key].forEach((rel) => {
+            if (rel?.id != null && !map.has(rel.id)) {
+              map.set(rel.id, rel);
+            }
+          });
+        }
+      });
+    });
+    return map;
+  }, [allProducts, products]);
+
+  const getRelatedProducts = useCallback(
+    (ids) => {
+      if (!ids || !Array.isArray(ids)) return [];
+      return ids.map((id) => relatedProductMap.get(id)).filter(Boolean);
+    },
+    [relatedProductMap]
+  );
 
   const renderProductList = () => {
     if (loading) {
-      return <CardGridSkeleton count={6} />;
+      return <CardGridSkeleton count={Math.min(pageSize, 6)} />;
     }
 
     if (error) {
-      return <ErrorState message={error} onRetry={() => fetchProducts(searchTerm)} />;
+      return <ErrorState message={error} onRetry={() => fetchProducts(activeSearch, page, pageSize)} />;
     }
 
     if (products.length === 0) {
@@ -355,11 +440,11 @@ export default function ProductSearch() {
     );
   };
 
-  const subtitleText = searchTerm && !loading
-    ? `搜索 "${searchTerm}" · 共 ${products.length} 个结果`
+  const subtitleText = activeSearch && !loading
+    ? `搜索 "${activeSearch}" · 共 ${pagination.total} 个结果`
     : loading
       ? '正在同步产品目录...'
-      : `共 ${products.length} 个产品`;
+      : `共 ${pagination.total} 个产品`;
 
   return (
     <div>
@@ -369,12 +454,25 @@ export default function ProductSearch() {
         searchTerm={searchTerm}
         onSearchChange={handleSearchChange}
         onClearSearch={clearSearch}
-        searchPlaceholder="输入 SKU、Model 或 FCC ID 搜索产品..."
+        searchPlaceholder="输入 SKU、Model、品牌或 FCC ID 搜索产品..."
         searching={searching}
         loading={loading}
       />
 
       {renderProductList()}
+
+      {!error && (
+        <PaginationBar
+          page={pagination.page}
+          pageSize={pageSize}
+          total={pagination.total}
+          totalPages={pagination.totalPages}
+          onPageChange={setPage}
+          onPageSizeChange={handlePageSizeChange}
+          loading={loading}
+          itemLabel="个产品"
+        />
+      )}
 
       {/* 关联产品模态框（含可匹配 / 升级款 / 可替代 Tab） */}
       <ProductRelationModal

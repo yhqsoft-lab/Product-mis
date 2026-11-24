@@ -8,7 +8,7 @@ if (!process.env.JWT_SECRET) {
 }
 
 // ================= 主认证中间件 =================
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -22,7 +22,27 @@ const authMiddleware = (req, res, next) => {
 
     // ✅ 验证 Token
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // 仅附加 payload，不查库
+
+    // ✅ 实时读取数据库中的角色与启用状态，确保角色变更或禁用立即生效
+    const dbUser = await User.findByPk(decoded.id, {
+      attributes: ['id', 'username', 'role', 'isActive']
+    });
+
+    if (!dbUser) {
+      return res.status(401).json({ success: false, message: '账号不存在或已被删除', code: 'USER_NOT_FOUND' });
+    }
+
+    if (dbUser.isActive === false) {
+      return res.status(403).json({ success: false, message: '账号已被禁用，请联系管理员', code: 'ACCOUNT_DISABLED' });
+    }
+
+    req.user = {
+      ...decoded,
+      id: dbUser.id,
+      username: dbUser.username,
+      role: dbUser.role,
+      isActive: dbUser.isActive
+    };
     next();
   } catch (err) {
     // 🚫 移除生产环境的 token 打印日志

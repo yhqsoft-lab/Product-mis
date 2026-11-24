@@ -18,9 +18,11 @@ import ProductManagement from './pages/ProductManagement';
 import ProductCatalog from './pages/ProductCatalog';
 import ProductView from './pages/ProductView';
 import FccView from './pages/FccView';
+import UserManagement from './pages/UserManagement';
+import OptionManagement from './pages/OptionManagement';
 import IdleWarningDialog from './components/IdleWarningDialog';
 
-const PROTECTED_ROUTES = ['/fccs', '/products'];
+const PROTECTED_ROUTES = ['/fccs', '/products', '/options', '/users'];
 
 // 🔍 自动登出监听器
 const AutoLogoutWatcher = () => {
@@ -40,14 +42,18 @@ const AutoLogoutWatcher = () => {
   return null;
 };
 
-// 🔐 受保护的路由组件
-const ProtectedRoute = () => {
+// 🔐 受保护的路由组件（支持按角色鉴权）
+const ProtectedRoute = ({ allowedRoles = ['admin', 'editor'] }) => {
   const { user, loading } = useUser();
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">验证中...</div>;
   }
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+  if (!allowedRoles.includes(user.role)) {
+    const fallback = user.role === 'editor' ? '/products' : '/productview';
+    return <Navigate to={fallback} replace />;
   }
   return <Outlet />;
 };
@@ -74,9 +80,13 @@ const AppRoutes = () => {
           <Route path="/productcatalog" element={<ProductCatalog />} />
           <Route path="/productview" element={<ProductView />} />
           <Route path="/fccview" element={<FccView />} />
-          <Route element={<ProtectedRoute />}>
+          <Route element={<ProtectedRoute allowedRoles={['admin', 'editor']} />}>
             <Route path="/fccs" element={<FccManagement />} />
             <Route path="/products" element={<ProductManagement />} />
+            <Route path="/options" element={<OptionManagement />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
+            <Route path="/users" element={<UserManagement />} />
           </Route>
           <Route path="/" element={<Navigate to="/productview" replace />} />
           <Route path="*" element={<Navigate to="/productview" replace />} />

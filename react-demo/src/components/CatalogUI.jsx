@@ -9,7 +9,9 @@ import {
   FileText,
   Package,
   ExternalLink,
-  ShoppingCart
+  ShoppingCart,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 export const formatMediaUrl = (path, baseUrl = '') => {
@@ -1031,5 +1033,183 @@ export function FccDetailModal({ fcc, onClose, baseUrl = '' }) {
         </div>
       </div>
     </div>
+  );
+}
+
+const buildPageNumbers = (currentPage, totalPages) => {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  const pages = [1];
+  const left = Math.max(2, currentPage - 1);
+  const right = Math.min(totalPages - 1, currentPage + 1);
+
+  if (left > 2) pages.push('ellipsis-left');
+  for (let i = left; i <= right; i += 1) {
+    pages.push(i);
+  }
+  if (right < totalPages - 1) pages.push('ellipsis-right');
+  pages.push(totalPages);
+  return pages;
+};
+
+export function PaginationBar({
+  page = 1,
+  pageSize = 12,
+  total = 0,
+  totalPages = 0,
+  onPageChange,
+  onPageSizeChange,
+  pageSizeOptions = [6, 12, 24, 48],
+  loading = false,
+  itemLabel = '条记录',
+  scrollToTop = true
+}) {
+  const [jumpInput, setJumpInput] = useState('');
+
+  if (!total || total <= 0) return null;
+
+  const effectiveTotalPages = Math.max(1, totalPages || Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, page), effectiveTotalPages);
+  const startItem = (safePage - 1) * pageSize + 1;
+  const endItem = Math.min(safePage * pageSize, total);
+  const pageNumbers = buildPageNumbers(safePage, effectiveTotalPages);
+
+  const goToPage = (nextPage) => {
+    const clamped = Math.min(Math.max(1, nextPage), effectiveTotalPages);
+    if (clamped === safePage || loading) return;
+    if (onPageChange) onPageChange(clamped);
+    if (scrollToTop && typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const handlePageSizeChange = (e) => {
+    const nextSize = Number(e.target.value);
+    if (!Number.isInteger(nextSize) || nextSize <= 0 || nextSize === pageSize) return;
+    if (onPageSizeChange) onPageSizeChange(nextSize);
+    if (scrollToTop && typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const handleJumpSubmit = (e) => {
+    e.preventDefault();
+    const target = Number.parseInt(jumpInput, 10);
+    if (Number.isInteger(target) && target >= 1 && target <= effectiveTotalPages) {
+      goToPage(target);
+    }
+    setJumpInput('');
+  };
+
+  return (
+    <nav
+      aria-label="分页导航"
+      className="bg-white border border-slate-200 rounded-xl px-4 py-3 mt-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+    >
+      {/* 左侧：记录范围与每页条数 */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500 tabular-nums">
+        <span>
+          显示第 <span className="font-medium text-slate-800">{startItem}–{endItem}</span> 条，共{' '}
+          <span className="font-medium text-slate-800">{total}</span> {itemLabel}
+        </span>
+
+        {onPageSizeChange && (
+          <label className="inline-flex items-center gap-1.5 text-slate-500">
+            <span>每页</span>
+            <select
+              aria-label="每页显示数量"
+              value={pageSize}
+              onChange={handlePageSizeChange}
+              disabled={loading}
+              className="h-8 px-2 text-xs font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50"
+            >
+              {pageSizeOptions.map((size) => (
+                <option key={size} value={size}>
+                  {size} 条
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+
+      {/* 右侧：页码控制与快速跳转 */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => goToPage(safePage - 1)}
+          disabled={loading || safePage <= 1}
+          aria-label="上一页"
+          className="inline-flex items-center gap-1 h-8 px-2.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+          <span>上一页</span>
+        </button>
+
+        <div className="flex items-center gap-1">
+          {pageNumbers.map((item) => {
+            if (typeof item === 'string') {
+              return (
+                <span
+                  key={item}
+                  aria-hidden="true"
+                  className="inline-flex items-center justify-center w-7 h-8 text-xs text-slate-400 select-none"
+                >
+                  …
+                </span>
+              );
+            }
+            const isActive = item === safePage;
+            return (
+              <button
+                key={item}
+                type="button"
+                onClick={() => goToPage(item)}
+                disabled={loading}
+                aria-label={`第 ${item} 页`}
+                aria-current={isActive ? 'page' : undefined}
+                className={`inline-flex items-center justify-center min-w-[32px] h-8 px-2 text-xs font-medium rounded-lg border transition-colors tabular-nums ${
+                  isActive
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+                } disabled:opacity-60`}
+              >
+                {item}
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => goToPage(safePage + 1)}
+          disabled={loading || safePage >= effectiveTotalPages}
+          aria-label="下一页"
+          className="inline-flex items-center gap-1 h-8 px-2.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+        >
+          <span>下一页</span>
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+
+        {effectiveTotalPages > 5 && (
+          <form onSubmit={handleJumpSubmit} className="inline-flex items-center gap-1.5 ml-1.5 text-xs text-slate-500">
+            <span className="hidden sm:inline">跳至</span>
+            <input
+              type="number"
+              min={1}
+              max={effectiveTotalPages}
+              value={jumpInput}
+              onChange={(e) => setJumpInput(e.target.value)}
+              placeholder={String(safePage)}
+              aria-label="跳转页码"
+              disabled={loading}
+              className="w-12 h-8 px-2 text-center text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 tabular-nums"
+            />
+            <span className="hidden sm:inline">页</span>
+          </form>
+        )}
+      </div>
+    </nav>
   );
 }

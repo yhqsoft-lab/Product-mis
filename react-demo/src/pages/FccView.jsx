@@ -12,43 +12,87 @@ import {
   ErrorState,
   ProductDetailModal,
   FccControllerTabs,
-  FccDetailModal
+  FccDetailModal,
+  PaginationBar
 } from '../components/CatalogUI';
+
+const DEFAULT_PAGE_SIZE = 12;
 
 export default function FccView() {
   const [fccs, setFccs] = useState([]);
-  useFooterRight(fccs.length > 0 ? `当前显示 ${fccs.length} 条 FCC 记录` : '');
   const [allProducts, setAllProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [detailFcc, setDetailFcc] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeSearch, setActiveSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 0
+  });
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState(null);
+
+  useFooterRight(
+    pagination.total > 0
+      ? `第 ${pagination.page} / ${Math.max(1, pagination.totalPages)} 页 · 共 ${pagination.total} 条 FCC 记录`
+      : ''
+  );
 
   const rawApiBase = process.env.REACT_APP_API_BASE || '';
   const BASE_URL = /^https?:\/\//i.test(rawApiBase) ? rawApiBase.replace(/\/+$/, '') : '';
   const API_FCCS = `${BASE_URL}/api/fccs`;
   const API_PRODUCTS = `${BASE_URL}/api/products`;
 
-  const fetchFccs = useCallback(async (search = '') => {
+  const fetchFccs = useCallback(async (search = '', targetPage = 1, targetPageSize = DEFAULT_PAGE_SIZE) => {
     setLoading(true);
     setError(null);
     try {
-      const url = search
-        ? `${API_FCCS}?search=${encodeURIComponent(search)}`
-        : API_FCCS;
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        pageSize: String(targetPageSize)
+      });
+      if (search.trim()) {
+        params.set('search', search.trim());
+      }
+      const url = `${API_FCCS}?${params.toString()}`;
       const res = await safeFetch(url);
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.message || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      setFccs(Array.isArray(data) ? data : []);
+      if (Array.isArray(data)) {
+        setFccs(data);
+        setPagination({
+          page: 1,
+          pageSize: targetPageSize,
+          total: data.length,
+          totalPages: data.length > 0 ? Math.ceil(data.length / targetPageSize) : 0
+        });
+      } else {
+        const items = Array.isArray(data.items) ? data.items : [];
+        const nextPagination = data.pagination || {
+          page: targetPage,
+          pageSize: targetPageSize,
+          total: items.length,
+          totalPages: items.length > 0 ? 1 : 0
+        };
+        setFccs(items);
+        setPagination(nextPagination);
+        if (nextPagination.page && nextPagination.page !== targetPage) {
+          setPage(nextPagination.page);
+        }
+      }
     } catch (err) {
       console.error('❌ 获取 FCC 列表失败:', err);
       setError(err.message);
       setFccs([]);
+      setPagination({ page: 1, pageSize: targetPageSize, total: 0, totalPages: 0 });
     } finally {
       setLoading(false);
       setSearching(false);
@@ -56,16 +100,28 @@ export default function FccView() {
   }, [API_FCCS]);
 
   useEffect(() => {
-    if (searchTerm.trim() === '') {
-      fetchFccs();
+    const trimmed = searchTerm.trim();
+    if (trimmed === activeSearch) {
+      setSearching(false);
+      return;
+    }
+    if (trimmed === '') {
+      setSearching(false);
+      setActiveSearch('');
+      setPage(1);
       return;
     }
     setSearching(true);
     const timer = setTimeout(() => {
-      fetchFccs(searchTerm);
+      setActiveSearch(trimmed);
+      setPage(1);
     }, 400);
     return () => clearTimeout(timer);
-  }, [searchTerm, fetchFccs]);
+  }, [searchTerm, activeSearch]);
+
+  useEffect(() => {
+    fetchFccs(activeSearch, page, pageSize);
+  }, [activeSearch, page, pageSize, fetchFccs]);
 
   useEffect(() => {
     let active = true;
@@ -119,16 +175,23 @@ export default function FccView() {
 
   const clearSearch = () => {
     setSearchTerm('');
+    setActiveSearch('');
+    setPage(1);
     setSearching(false);
+  };
+
+  const handlePageSizeChange = (nextSize) => {
+    setPageSize(nextSize);
+    setPage(1);
   };
 
   const renderContent = () => {
     if (loading) {
-      return <CardGridSkeleton count={6} />;
+      return <CardGridSkeleton count={Math.min(pageSize, 6)} />;
     }
 
     if (error) {
-      return <ErrorState message={error} onRetry={() => fetchFccs(searchTerm)} />;
+      return <ErrorState message={error} onRetry={() => fetchFccs(activeSearch, page, pageSize)} />;
     }
 
     if (fccs.length === 0) {
@@ -229,11 +292,11 @@ export default function FccView() {
     );
   };
 
-  const subtitleText = searchTerm && !loading
-    ? `搜索 "${searchTerm}" · 共 ${fccs.length} 条记录`
+  const subtitleText = activeSearch && !loading
+    ? `搜索 "${activeSearch}" · 共 ${pagination.total} 条记录`
     : loading
       ? '正在加载 FCC ID 记录...'
-      : `共 ${fccs.length} 条 FCC 记录`;
+      : `共 ${pagination.total} 条 FCC 记录`;
 
   return (
     <div>
@@ -249,6 +312,19 @@ export default function FccView() {
       />
 
       {renderContent()}
+
+      {!error && (
+        <PaginationBar
+          page={pagination.page}
+          pageSize={pageSize}
+          total={pagination.total}
+          totalPages={pagination.totalPages}
+          onPageChange={setPage}
+          onPageSizeChange={handlePageSizeChange}
+          loading={loading}
+          itemLabel="条 FCC 记录"
+        />
+      )}
 
       <ProductDetailModal
         product={selectedProduct}

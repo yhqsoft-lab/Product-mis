@@ -1,20 +1,74 @@
 // controllers/FccController.js
 const { Op } = require('sequelize');
 const { Fcc, Product } = require('../models');
+const { ensureOptionExists } = require('./OptionController');
 const path = require('path');
 const fs = require('fs').promises;
 
-// 获取所有 FCC（支持模糊搜索）
+const parsePaginationParams = (query, defaultPageSize = 12, maxPageSize = 100) => {
+  const hasPagination =
+    query.page !== undefined || query.pageSize !== undefined || query.limit !== undefined;
+  const rawPage = Number.parseInt(query.page, 10);
+  const rawSize = Number.parseInt(query.pageSize ?? query.limit, 10);
+  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+  const pageSize =
+    Number.isInteger(rawSize) && rawSize > 0
+      ? Math.min(rawSize, maxPageSize)
+      : defaultPageSize;
+  return { hasPagination, page, pageSize };
+};
+
+// 获取 FCC 列表（支持模糊搜索与服务端分页）
 exports.getFccs = async (req, res) => {
-  const { search } = req.query;
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const { hasPagination, page, pageSize } = parsePaginationParams(req.query, 12, 100);
+
   try {
-    const whereClause = search ? {
-      [Op.or]: [
-        { name: { [Op.like]: `%${search}%` } },
-        { brand: { [Op.like]: `%${search}%` } },
-        { description: { [Op.like]: `%${search}%` } }
-      ]
-    } : {};
+    const whereClause = search
+      ? {
+          [Op.or]: [
+            { name: { [Op.like]: `%${search}%` } },
+            { brand: { [Op.like]: `%${search}%` } },
+            { description: { [Op.like]: `%${search}%` } }
+          ]
+        }
+      : {};
+
+    if (hasPagination) {
+      const total = await Fcc.count({ where: whereClause });
+      const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+      const safePage = totalPages > 0 ? Math.min(page, totalPages) : 1;
+      const offset = (safePage - 1) * pageSize;
+
+      let results = [];
+      if (total > 0) {
+        const idRows = await Fcc.findAll({
+          where: whereClause,
+          attributes: ['id'],
+          order: [['id', 'DESC']],
+          limit: pageSize,
+          offset
+        });
+        const pageIds = idRows.map((row) => row.id);
+        if (pageIds.length > 0) {
+          results = await Fcc.findAll({
+            where: { id: { [Op.in]: pageIds } },
+            include: [{ model: Product, as: 'Products', through: { attributes: [] } }],
+            order: [['id', 'DESC']]
+          });
+        }
+      }
+
+      return res.status(200).json({
+        items: results,
+        pagination: {
+          page: safePage,
+          pageSize,
+          total,
+          totalPages
+        }
+      });
+    }
 
     const results = await Fcc.findAll({
       where: whereClause,
@@ -112,6 +166,13 @@ exports.createFcc = async (req, res) => {
       image: imagePath
     });
 
+    // 自动将新输入的品牌/产品类型/规格写入数据库下拉选项表
+    await Promise.all([
+      ensureOptionExists('brand', brand),
+      ensureOptionExists('productType', productType),
+      ensureOptionExists('speed', speed)
+    ]);
+
     res.status(201).json(newFcc);
   } catch (err) {
     // 🗑️ 数据库写入失败时，清理已上传的图片文件
@@ -154,6 +215,13 @@ exports.updateFcc = async (req, res) => {
       speed: speed ?? fcc.speed,
       image: imagePath
     });
+
+    // 自动将新输入的品牌/产品类型/规格写入数据库下拉选项表
+    await Promise.all([
+      ensureOptionExists('brand', fcc.brand),
+      ensureOptionExists('productType', fcc.productType),
+      ensureOptionExists('speed', fcc.speed)
+    ]);
 
     res.json(fcc);
   } catch (err) {

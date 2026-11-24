@@ -25,6 +25,8 @@ const { sequelize } = require('./models');
 const FccRoutes = require('./routes/FccRoutes');
 const ProductRoutes = require('./routes/ProductRoutes');
 const LoginRoutes = require('./routes/authRoutes');
+const OptionRoutes = require('./routes/OptionRoutes');
+const { syncInitialOptions } = require('./controllers/OptionController');
 
 // ✅ 安全中间件（注意顺序！）
 app.use(morgan('dev'));
@@ -82,6 +84,7 @@ app.get('/health', async (req, res) => {
 app.use('/api/fccs', FccRoutes);
 app.use('/api/auth', LoginRoutes);
 app.use('/api/products', ProductRoutes); // 文件上传逻辑在此路由内部处理
+app.use('/api/options', OptionRoutes);
 
 // ✅ API 未匹配路由返回 JSON 404
 app.use('/api', (req, res) => {
@@ -222,6 +225,9 @@ const startServer = async () => {
         console.warn('⚠️ 自动校验 products 表字段失败:', migrateErr.message);
       }
     }
+
+    // ✅ 初始化并同步数据库下拉选项表（dropdown_options）
+    await syncInitialOptions();
 
     const [tables] = await sequelize.query('SHOW TABLES');
     if (tables.length > 0) {
