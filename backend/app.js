@@ -187,6 +187,42 @@ const startServer = async () => {
     await sequelize.sync(syncOptions);
     console.log('✅ 数据库同步成功');
 
+    // ✅ 自动补齐真实 MySQL 中 products 表的新增字段与状态枚举（幂等安全）
+    if (typeof sequelize.getDialect === 'function' && sequelize.getDialect() === 'mysql') {
+      try {
+        const [columns] = await sequelize.query('SHOW COLUMNS FROM `products`');
+        const colNames = columns.map((c) => c.Field);
+        const hasExactProductFccId = colNames.includes('productfccId');
+
+        if (!hasExactProductFccId) {
+          const legacyCol = colNames.find(
+            (name) => name.toLowerCase() === 'fccid' || name.toLowerCase() === 'productfccid'
+          );
+          if (legacyCol) {
+            await sequelize.query(
+              `ALTER TABLE \`products\` CHANGE COLUMN \`${legacyCol}\` \`productfccId\` VARCHAR(255) NULL`
+            );
+            console.log(`✅ 已自动将 products.${legacyCol} 字段重命名为 productfccId`);
+          } else {
+            await sequelize.query(
+              'ALTER TABLE `products` ADD COLUMN `productfccId` VARCHAR(255) NULL AFTER `brand`'
+            );
+            console.log('✅ 已自动为 products 表添加 productfccId 字段');
+          }
+        }
+
+        const statusCol = columns.find((c) => c.Field === 'status');
+        if (statusCol && !String(statusCol.Type || '').includes('clearance')) {
+          await sequelize.query(
+            "ALTER TABLE `products` MODIFY COLUMN `status` ENUM('active','discontinued','development','clearance') NOT NULL DEFAULT 'active'"
+          );
+          console.log('✅ 已自动更新 products.status 枚举（补充 clearance）');
+        }
+      } catch (migrateErr) {
+        console.warn('⚠️ 自动校验 products 表字段失败:', migrateErr.message);
+      }
+    }
+
     const [tables] = await sequelize.query('SHOW TABLES');
     if (tables.length > 0) {
       console.log('📊 数据库中的表:');
