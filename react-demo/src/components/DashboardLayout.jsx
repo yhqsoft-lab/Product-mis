@@ -104,8 +104,8 @@ export default function DashboardLayout({ children, pageTitle }) {
     location.pathname.startsWith('/fccs');
 
   const footerLeftText = isFccRoute
-    ? `© ${new Date().getFullYear()} FCC ID | 数据来源于网络收集`
-    : `© ${new Date().getFullYear()} 产品中心 | 所有产品信息来源于数据库`;
+    ? `© ${new Date().getFullYear()} FCC ID | Copyright @ Echance Technology Co.,Ltd.`
+    : `© ${new Date().getFullYear()} 产品中心 | Copyright @ Echance Technology Co.,Ltd.`;
 
   // Close mobile drawer on Escape key
   useEffect(() => {

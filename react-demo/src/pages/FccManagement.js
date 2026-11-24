@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus,
+  Eye,
   Package,
   Pencil,
   Trash2,
@@ -23,7 +24,10 @@ import {
   CardGridSkeleton,
   EmptyState,
   ErrorState,
-  showAppToast
+  showAppToast,
+  ProductDetailModal,
+  FccControllerTabs,
+  FccDetailModal
 } from '../components/CatalogUI';
 
 // 保持对外导出兼容
@@ -51,13 +55,15 @@ export default function FccManagement() {
     speed: false
   });
 
-  // 关联产品管理状态
+  // 关联控制器管理状态
   const [selectedFcc, setSelectedFcc] = useState(null);
   const [products, setProducts] = useState([]);
   const [availableProducts, setAvailableProducts] = useState([]);
   const [productManagementLoading, setProductManagementLoading] = useState(false);
   const [productManagementError, setProductManagementError] = useState('');
   const [showProductManagement, setShowProductManagement] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [detailFcc, setDetailFcc] = useState(null);
 
   // 删除对话框状态
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -200,7 +206,13 @@ export default function FccManagement() {
       });
       if (!res.ok) throw new Error('获取关联产品失败');
       const data = await res.json();
-      setProducts(Array.isArray(data) ? data : []);
+      const nextProducts = Array.isArray(data) ? data : [];
+      setProducts(nextProducts);
+      setFccs((prev) =>
+        prev.map((item) =>
+          item.id === selectedFcc.id ? { ...item, Products: nextProducts } : item
+        )
+      );
     } catch (err) {
       console.error('获取关联产品失败:', err);
       setProductManagementError(err.message);
@@ -208,6 +220,28 @@ export default function FccManagement() {
       setProductManagementLoading(false);
     }
   }, [API_URL, selectedFcc, getAuthHeaders]);
+
+  const productMap = useMemo(() => {
+    const map = new Map();
+    availableProducts.forEach((p) => map.set(p.id, p));
+    return map;
+  }, [availableProducts]);
+
+  const getRelatedProducts = useCallback(
+    (ids) => {
+      if (!Array.isArray(ids) || ids.length === 0) return [];
+      return availableProducts.filter((p) => ids.includes(p.id));
+    },
+    [availableProducts]
+  );
+
+  const handleSelectProduct = useCallback(
+    (product) => {
+      if (!product) return;
+      setSelectedProduct(productMap.get(product.id) || product);
+    },
+    [productMap]
+  );
 
   useEffect(() => {
     if (isUserLoading || (!user && !token)) return;
@@ -221,8 +255,12 @@ export default function FccManagement() {
   }, [showProductManagement, selectedFcc, fetchProducts]);
 
   const filteredAvailableProducts = useMemo(() => {
+    const allowedTypes = new Set(['control kit', 'remote', 'receiver']);
     const associatedIds = new Set(products.map((p) => p.id));
-    return availableProducts.filter((p) => !associatedIds.has(p.id));
+    return availableProducts.filter((p) => {
+      const normalizedType = (p.productType || '').trim().toLowerCase();
+      return allowedTypes.has(normalizedType) && !associatedIds.has(p.id);
+    });
   }, [availableProducts, products]);
 
   const handleAddSuccess = () => {
@@ -240,9 +278,21 @@ export default function FccManagement() {
         throw new Error(errData.message || '移除失败');
       }
       setProducts((prev) => prev.filter((p) => p.id !== productId));
-      showAppToast('已移除关联产品', 'success');
+      setFccs((prev) =>
+        prev.map((item) =>
+          item.id === selectedFcc.id
+            ? {
+                ...item,
+                Products: (Array.isArray(item.Products) ? item.Products : []).filter(
+                  (p) => p.id !== productId
+                )
+              }
+            : item
+        )
+      );
+      showAppToast('已移除关联控制器', 'success');
     } catch (err) {
-      console.error('移除关联产品失败:', err);
+      console.error('移除关联控制器失败:', err);
       showAppToast(`移除失败：${err.message}`, 'error');
     }
   };
@@ -505,13 +555,13 @@ export default function FccManagement() {
                 />
               </div>
 
-              <div className="flex-1 min-w-0 p-3.5 sm:p-4 flex flex-col justify-between gap-2">
+              <div className="flex-1 min-w-0 p-3.5 sm:p-4 flex flex-col justify-center gap-2.5">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-medium text-slate-400">FCC ID</p>
                   <h3
-                    className="text-[15px] font-semibold font-mono text-slate-900 truncate mt-0.5"
+                    className="text-[15px] font-semibold font-mono text-slate-900 truncate leading-snug"
                     title={fcc.name || ''}
                   >
+                    <span className="font-sans text-xs font-medium text-slate-400">FCCID：</span>
                     {fcc.name || '—'}
                   </h3>
                 </div>
@@ -531,12 +581,6 @@ export default function FccManagement() {
                       {fcc.speed || '—'}
                     </dd>
                   </div>
-                  {fcc.replacement && (
-                    <div className="flex items-baseline gap-2 min-w-0">
-                      <dt className="text-slate-400 shrink-0 w-10">替换</dt>
-                      <dd className="text-emerald-700 font-medium truncate">{fcc.replacement}</dd>
-                    </div>
-                  )}
                 </dl>
               </div>
             </div>
@@ -552,16 +596,32 @@ export default function FccManagement() {
               </p>
             </div>
 
-            {/* 底部管理操作栏：与产品管理一致的清爽按钮风格 */}
-            <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/70 mt-auto">
-              <div className="grid grid-cols-3 gap-2">
+            {/* 适配的控制器 Tab 区（与前台 FCCID 查询卡片风格保持一体） */}
+            <FccControllerTabs
+              fccProducts={fcc.Products}
+              onSelectProduct={handleSelectProduct}
+              baseUrl={IMAGE_BASE_URL}
+              className="mt-auto"
+            />
+
+            {/* 底部管理操作栏 */}
+            <div className="px-4 py-2.5 border-t border-slate-200/70 bg-white">
+              <div className="grid grid-cols-4 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setDetailFcc(fcc)}
+                  className="inline-flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-medium hover:bg-slate-100 transition-colors whitespace-nowrap"
+                >
+                  <Eye className="w-3.5 h-3.5 shrink-0" />
+                  详情
+                </button>
                 <button
                   type="button"
                   onClick={() => openProductManagement(fcc)}
                   className="inline-flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-indigo-200 text-indigo-700 rounded-lg text-xs font-medium hover:bg-indigo-50 transition-colors whitespace-nowrap"
                 >
                   <Package className="w-3.5 h-3.5 shrink-0" />
-                  关联产品
+                  适配
                 </button>
                 <button
                   type="button"
@@ -600,7 +660,7 @@ export default function FccManagement() {
           <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-white">
             <div className="min-w-0">
               <h2 className="text-base font-semibold text-slate-900 truncate">
-                管理关联产品 — <span className="font-mono">{selectedFcc.name || selectedFcc.id}</span>
+                管理适配控制器 — <span className="font-mono">{selectedFcc.name || selectedFcc.id}</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5 truncate">
                 {selectedFcc.brand || '无品牌'}
@@ -640,6 +700,7 @@ export default function FccManagement() {
                   loading={productManagementLoading}
                   error={productManagementError}
                   onRemove={handleRemoveProduct}
+                  baseUrl={IMAGE_BASE_URL}
                 />
               </div>
             </div>
@@ -663,7 +724,7 @@ export default function FccManagement() {
         searchTerm={searchTerm}
         onSearchChange={handleSearchChange}
         onClearSearch={clearSearch}
-        searchPlaceholder="输入 FCC ID 或描述关键词搜索..."
+        searchPlaceholder="输入 FCC ID、品牌或描述关键词搜索..."
         searching={searching}
         loading={loading}
         actionButton={
@@ -697,6 +758,19 @@ export default function FccManagement() {
       />
 
       {renderProductManagement()}
+
+      <ProductDetailModal
+        product={selectedProduct}
+        onClose={() => setSelectedProduct(null)}
+        getRelatedProducts={getRelatedProducts}
+        baseUrl={IMAGE_BASE_URL}
+      />
+
+      <FccDetailModal
+        fcc={detailFcc}
+        onClose={() => setDetailFcc(null)}
+        baseUrl={IMAGE_BASE_URL}
+      />
 
       {/* 新增 / 编辑 FCC 模态框 */}
       {showModal && (

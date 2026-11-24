@@ -20,15 +20,19 @@ import ProductView from './pages/ProductView';
 import FccView from './pages/FccView';
 import IdleWarningDialog from './components/IdleWarningDialog';
 
+const PROTECTED_ROUTES = ['/fccs', '/products'];
+
 // 🔍 自动登出监听器
 const AutoLogoutWatcher = () => {
   const { user, loading } = useUser();
   const navigate = useNavigate();
   const location = useLocation();
-  const publicRoutes = ['/login', '/productview', '/fccview', '/productcatalog'];
 
   useEffect(() => {
-    if (!loading && !user && !publicRoutes.includes(location.pathname)) {
+    const isProtected = PROTECTED_ROUTES.some(
+      (route) => location.pathname === route || location.pathname.startsWith(`${route}/`)
+    );
+    if (!loading && !user && isProtected) {
       navigate('/login', { replace: true });
     }
   }, [user, loading, navigate, location.pathname]);

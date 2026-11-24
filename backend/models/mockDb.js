@@ -391,13 +391,22 @@ const Product = {
 
 const Fcc = {
   name: 'Fcc',
-  async findAll({ where, order } = {}) {
+  async findAll({ where, include, order } = {}) {
     let list = fccsData.filter((f) => matchesWhere(f, where));
     if (order && order[0]) {
       const [col, dir] = order[0];
       list = [...list].sort((a, b) => (dir === 'DESC' ? (b[col] > a[col] ? 1 : -1) : (a[col] > b[col] ? 1 : -1)));
     }
-    return list.map((f) => wrapFcc(f));
+    const includeProducts =
+      Array.isArray(include) && include.some((inc) => inc.as === 'Products' || inc.model === Product);
+    return list.map((f) => {
+      const extras = {};
+      if (includeProducts) {
+        const pids = fccProductsLinks.filter((l) => l.fccId === f.id).map((l) => l.productId);
+        extras.Products = productsData.filter((p) => pids.includes(p.id)).map((p) => ({ ...p }));
+      }
+      return wrapFcc(f, extras);
+    });
   },
   async findByPk(id, { include } = {}) {
     const found = fccsData.find((f) => String(f.id) === String(id));

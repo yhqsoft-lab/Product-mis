@@ -1,6 +1,16 @@
 // src/components/CatalogUI.jsx
 import React, { useState, useEffect } from 'react';
-import { Search, X, Image as ImageIcon, AlertCircle, RotateCw, FileText } from 'lucide-react';
+import {
+  Search,
+  X,
+  Image as ImageIcon,
+  AlertCircle,
+  RotateCw,
+  FileText,
+  Package,
+  ExternalLink,
+  ShoppingCart
+} from 'lucide-react';
 
 export const formatMediaUrl = (path, baseUrl = '') => {
   if (!path || path === 'null' || path === 'undefined') return null;
@@ -648,6 +658,376 @@ export function ProductRelationModal({
               暂无{currentTab.fullName}
             </p>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const CONTROLLER_TABS = ['Control Kit', 'Remote', 'Receiver'];
+
+const getControllersByTab = (fccProducts, tabName) => {
+  const target = tabName.toLowerCase();
+  return (Array.isArray(fccProducts) ? fccProducts : []).filter(
+    (p) => (p.productType || '').trim().toLowerCase() === target
+  );
+};
+
+export function FccControllerTabs({
+  fccProducts = [],
+  onSelectProduct,
+  baseUrl = '',
+  className = ''
+}) {
+  const [selectedTab, setSelectedTab] = useState(null);
+
+  const grouped = CONTROLLER_TABS.reduce((acc, tab) => {
+    acc[tab] = getControllersByTab(fccProducts, tab);
+    return acc;
+  }, {});
+
+  const totalCount = CONTROLLER_TABS.reduce(
+    (sum, tab) => sum + grouped[tab].length,
+    0
+  );
+
+  const defaultTab =
+    CONTROLLER_TABS.find((tab) => grouped[tab].length > 0) || CONTROLLER_TABS[0];
+  const currentTab = selectedTab || defaultTab;
+  const currentProducts = grouped[currentTab] || [];
+
+  return (
+    <div className={`border-t border-slate-100 bg-slate-50/70 ${className}`}>
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+          <Package className="w-3.5 h-3.5 text-slate-400" />
+          适配的控制器
+        </span>
+        <span className="text-[11px] text-slate-400 tabular-nums">
+          共 {totalCount} 款
+        </span>
+      </div>
+
+      <div
+        role="tablist"
+        aria-label="适配的控制器分类"
+        className="px-4 grid grid-cols-3 border-b border-slate-200/80"
+      >
+        {CONTROLLER_TABS.map((tab) => {
+          const isActive = currentTab === tab;
+          const count = grouped[tab].length;
+          return (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setSelectedTab(tab)}
+              className={`pb-2 pt-1 text-xs font-medium border-b-2 transition-colors whitespace-nowrap text-center tabular-nums ${
+                isActive
+                  ? 'border-indigo-600 text-indigo-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <span>{tab}</span>
+              <span
+                className={`ml-1 text-[11px] ${
+                  isActive ? 'text-indigo-600' : 'text-slate-400'
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="px-4 py-3">
+        {currentProducts.length > 0 ? (
+          <div className="space-y-2 max-h-44 overflow-y-auto">
+            {currentProducts.map((p) => (
+              <div
+                key={p.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelectProduct && onSelectProduct(p)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (onSelectProduct) onSelectProduct(p);
+                  }
+                }}
+                className="flex items-center gap-2.5 p-2 bg-white border border-slate-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50/40 transition-colors cursor-pointer"
+              >
+                <div className="w-10 h-10 aspect-square bg-slate-50 rounded-md border border-slate-100 overflow-hidden shrink-0">
+                  <MediaThumb
+                    src={formatMediaUrl(p.image, baseUrl)}
+                    alt={p.model || '产品'}
+                    className="w-full h-full aspect-square object-cover"
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className="text-xs font-semibold text-slate-900 truncate"
+                    title={p.model || ''}
+                  >
+                    <span className="font-normal text-slate-400 mr-1">Model:</span>
+                    {p.model || '未命名型号'}
+                  </p>
+                  <p className="text-[11px] font-mono text-slate-500 tabular-nums truncate mt-0.5">
+                    SKU: {p.sku || '—'}
+                  </p>
+                </div>
+                {(p.httpLink || p.manual) && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    {p.httpLink && (
+                      <a
+                        href={p.httpLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title="购买"
+                        aria-label="购买"
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-indigo-600 bg-indigo-50/70 hover:bg-indigo-100/80 rounded-md transition-colors whitespace-nowrap"
+                      >
+                        <ShoppingCart className="w-3.5 h-3.5 shrink-0" />
+                        <span>购买</span>
+                      </a>
+                    )}
+                    {p.manual && (
+                      <a
+                        href={formatMediaUrl(p.manual, baseUrl)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title="查看 PDF 说明书"
+                        aria-label="查看 PDF 说明书"
+                        className="p-1 text-slate-400 hover:text-indigo-600 rounded hover:bg-indigo-50 transition-colors"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400 text-center py-3">
+            暂无适配的 {currentTab}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const FCC_CONTROLLER_GROUPS = [
+  { key: 'Control Kit', label: 'Control Kit', accentClass: 'text-indigo-700' },
+  { key: 'Remote', label: 'Remote', accentClass: 'text-emerald-700' },
+  { key: 'Receiver', label: 'Receiver', accentClass: 'text-amber-700' }
+];
+
+export function FccDetailModal({ fcc, onClose, baseUrl = '' }) {
+  const [expandedKey, setExpandedKey] = useState(null);
+
+  useEffect(() => {
+    setExpandedKey(null);
+  }, [fcc?.id]);
+
+  useEffect(() => {
+    if (!fcc) return;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [fcc, onClose]);
+
+  if (!fcc) return null;
+
+  const linkedProducts = Array.isArray(fcc.Products) ? fcc.Products : [];
+  const resolvedGroups = FCC_CONTROLLER_GROUPS.map((group) => ({
+    ...group,
+    items: getControllersByTab(linkedProducts, group.key)
+  }));
+
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center z-50 p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="bg-white border border-slate-200 rounded-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
+        <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-white">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-slate-900 truncate">FCCID 详情</h2>
+            <p className="text-xs text-slate-500 mt-0.5 font-mono truncate">
+              FCCID：{fcc.name || '—'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭"
+            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors shrink-0"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto flex-1 space-y-5 bg-slate-50/40">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">FCC ID</label>
+              <p className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm font-mono text-slate-900 break-all">
+                {fcc.name || '—'}
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">品牌 (Brand)</label>
+              <p className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-900">
+                {fcc.brand || '—'}
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">产品类型</label>
+              <p className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-900">
+                {fcc.productType || '—'}
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">规格 (AC/DC)</label>
+              <p className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-900">
+                {fcc.speed || '—'}
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">描述信息</label>
+            <p className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 min-h-[76px] whitespace-pre-wrap leading-relaxed">
+              {fcc.description || '暂无描述'}
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1.5">适配的控制器</label>
+            <div className="p-4 bg-white border border-slate-200 rounded-lg space-y-3.5 text-sm">
+              {resolvedGroups.map((group, groupIdx) => (
+                <div
+                  key={group.key}
+                  className={`${groupIdx > 0 ? 'border-t border-slate-100 pt-3 ' : ''}flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3`}
+                >
+                  <span className="text-xs font-medium text-slate-500 w-24 shrink-0">
+                    {group.label}
+                  </span>
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    {group.items.length > 0 ? (
+                      group.items.map((p) => {
+                        const itemKey = `${group.key}-${p.id}`;
+                        const isExpanded = expandedKey === itemKey;
+                        return (
+                          <div key={p.id}>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedKey((prev) => (prev === itemKey ? null : itemKey))
+                              }
+                              aria-expanded={isExpanded}
+                              className={`w-full text-left flex items-start justify-between gap-2 px-2 py-1 -mx-2 rounded-lg text-sm leading-relaxed transition-colors cursor-pointer ${
+                                isExpanded ? 'bg-slate-50' : 'hover:bg-slate-50'
+                              }`}
+                            >
+                              <span className="break-words min-w-0">
+                                <span className="text-slate-500">Model：</span>
+                                <span className={`font-medium ${group.accentClass}`}>
+                                  {p.model || '—'}
+                                </span>
+                                <span className="text-slate-400">，</span>
+                                <span className="text-slate-500">SKU：</span>
+                                <span className="font-mono tabular-nums text-slate-800">
+                                  {p.sku || '—'}
+                                </span>
+                              </span>
+                              <span className="inline-flex items-center gap-1 text-xs text-slate-400 shrink-0 mt-0.5 whitespace-nowrap">
+                                <ImageIcon className="w-3.5 h-3.5" />
+                                <span>{isExpanded ? '收起' : '图片'}</span>
+                              </span>
+                            </button>
+                            {isExpanded && (
+                              <div className="mt-2 mb-1 p-3 bg-slate-50/80 border border-slate-200 rounded-lg inline-flex flex-col items-center gap-2">
+                                <div className="w-40 h-40 aspect-square rounded-lg overflow-hidden border border-slate-200 bg-white">
+                                  <MediaThumb
+                                    src={formatMediaUrl(p.image, baseUrl)}
+                                    alt={p.model || '控制器图片'}
+                                    className="w-full h-full object-contain bg-white"
+                                    fallbackText="暂无图片"
+                                  />
+                                </div>
+                                {(p.httpLink || p.manual) && (
+                                  <div className="flex items-center gap-3 text-xs">
+                                    {p.httpLink && (
+                                      <a
+                                        href={p.httpLink}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-indigo-600 hover:underline font-medium"
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" />
+                                        产品链接
+                                      </a>
+                                    )}
+                                    {p.manual && (
+                                      <a
+                                        href={formatMediaUrl(p.manual, baseUrl)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-indigo-600 hover:underline font-medium"
+                                      >
+                                        <FileText className="w-3.5 h-3.5" />
+                                        说明书
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <span className="text-slate-400">无</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1.5">产品图片</label>
+            <div className="p-4 bg-white border border-slate-200 rounded-lg flex justify-center items-center min-h-[180px]">
+              {fcc.image ? (
+                <div className="w-56 h-56 aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
+                  <MediaThumb
+                    src={formatMediaUrl(fcc.image, baseUrl)}
+                    alt={fcc.name || 'FCC 图片'}
+                    className="w-full h-full object-contain bg-white"
+                  />
+                </div>
+              ) : (
+                <span className="text-sm text-slate-400">暂无图片</span>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

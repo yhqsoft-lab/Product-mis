@@ -11,12 +11,14 @@ exports.getFccs = async (req, res) => {
     const whereClause = search ? {
       [Op.or]: [
         { name: { [Op.like]: `%${search}%` } },
+        { brand: { [Op.like]: `%${search}%` } },
         { description: { [Op.like]: `%${search}%` } }
       ]
     } : {};
 
     const results = await Fcc.findAll({
       where: whereClause,
+      include: [{ model: Product, as: 'Products', through: { attributes: [] } }],
       order: [['id', 'DESC']]
     });
     res.status(200).json(results);

@@ -15,6 +15,7 @@ exports.getProducts = async (req, res) => {
       where[Op.or] = [
         { model: { [Op.like]: `%${search}%` } },
         { sku: { [Op.like]: `%${search}%` } },
+        { brand: { [Op.like]: `%${search}%` } },
         { productfccId: { [Op.like]: `%${search}%` } },
       ];
     }
