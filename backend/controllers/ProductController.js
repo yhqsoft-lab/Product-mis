@@ -27,8 +27,10 @@ const RELATED_PRODUCT_ATTRIBUTES = [
   'productType',
   'description',
   'httpLink',
+  'nasLink',
   'status',
   'manual',
+  'qaDocument',
   'image'
 ];
 
@@ -79,12 +81,21 @@ exports.getProducts = async (req, res) => {
   try {
     const where = {};
     if (search) {
-      where[Op.or] = [
-        { model: { [Op.like]: `%${search}%` } },
-        { sku: { [Op.like]: `%${search}%` } },
-        { brand: { [Op.like]: `%${search}%` } },
-        { productfccId: { [Op.like]: `%${search}%` } }
-      ];
+      const tokens = search.split(/[\s+＋]+/).filter(Boolean);
+      const buildTokenClause = (token) => ({
+        [Op.or]: [
+          { model: { [Op.like]: `%${token}%` } },
+          { sku: { [Op.like]: `%${token}%` } },
+          { brand: { [Op.like]: `%${token}%` } },
+          { productfccId: { [Op.like]: `%${token}%` } }
+        ]
+      });
+
+      if (tokens.length > 1) {
+        where[Op.and] = tokens.map(buildTokenClause);
+      } else if (tokens.length === 1) {
+        Object.assign(where, buildTokenClause(tokens[0]));
+      }
     }
 
     if (hasPagination) {
@@ -147,11 +158,18 @@ const isValidProductStatus = async (statusValue) => {
   return Boolean(matched);
 };
 
+const isSafeExternalLink = (rawLink) => {
+  if (!rawLink) return true;
+  const lower = String(rawLink).trim().toLowerCase();
+  return !/^(javascript|vbscript|data):/.test(lower);
+};
+
 const cleanupUploadedFiles = async (files) => {
   if (!files) return;
   const targets = [
     ...(files.image || []),
-    ...(files.manual || [])
+    ...(files.manual || []),
+    ...(files.qaDocument || [])
   ];
   await Promise.all(
     targets.map(async (f) => {
@@ -176,6 +194,7 @@ exports.createProduct = async (req, res) => {
     const productfccId = String(req.body.productfccId ?? req.body.fccId ?? '').trim();
     const productType = String(req.body.productType || '').trim();
     const httpLink = String(req.body.httpLink || '').trim();
+    const nasLink = String(req.body.nasLink || '').trim();
     const status = req.body.status !== undefined && req.body.status !== ''
       ? String(req.body.status).trim()
       : 'active';
@@ -188,13 +207,9 @@ exports.createProduct = async (req, res) => {
       await cleanupUploadedFiles(req.files);
       return res.status(400).json({ success: false, message: '型号（Model）不能为空' });
     }
-    if (!brand) {
+    if (!isSafeExternalLink(httpLink) || !isSafeExternalLink(nasLink)) {
       await cleanupUploadedFiles(req.files);
-      return res.status(400).json({ success: false, message: '完美替代品牌不能为空' });
-    }
-    if (!productfccId) {
-      await cleanupUploadedFiles(req.files);
-      return res.status(400).json({ success: false, message: '完美替代型号（FCC ID）不能为空' });
+      return res.status(400).json({ success: false, message: '链接协议不安全，请使用合法的链接地址' });
     }
     if (!(await isValidProductStatus(status))) {
       await cleanupUploadedFiles(req.files);
@@ -223,6 +238,7 @@ exports.createProduct = async (req, res) => {
 
     let imagePath = null;
     let manualPath = null;
+    let qaDocumentPath = null;
 
     if (req.files) {
       if (req.files.image && req.files.image[0]) {
@@ -230,6 +246,9 @@ exports.createProduct = async (req, res) => {
       }
       if (req.files.manual && req.files.manual[0]) {
         manualPath = `/uploads/${req.files.manual[0].filename}`;
+      }
+      if (req.files.qaDocument && req.files.qaDocument[0]) {
+        qaDocumentPath = `/uploads/${req.files.qaDocument[0].filename}`;
       }
     }
 
@@ -241,15 +260,17 @@ exports.createProduct = async (req, res) => {
       productfccId,
       productType,
       httpLink,
+      nasLink,
       status,
       manual: manualPath,
+      qaDocument: qaDocumentPath,
       image: imagePath
     });
 
     // 自动将新输入的品牌/产品类型写入数据库下拉选项表
     await Promise.all([
-      ensureOptionExists('brand', brand),
-      ensureOptionExists('productType', productType)
+      brand ? ensureOptionExists('brand', brand) : Promise.resolve(),
+      productType ? ensureOptionExists('productType', productType) : Promise.resolve()
     ]);
 
     const plain = newProduct.toJSON ? newProduct.toJSON() : newProduct;
@@ -257,6 +278,7 @@ exports.createProduct = async (req, res) => {
       ...plain,
       compatibleIds: [],
       upgradeIds: [],
+      mutualReplacementIds: [],
       replacementIds: []
     });
   } catch (err) {
@@ -279,11 +301,12 @@ exports.updateProduct = async (req, res) => {
     const sku = req.body.sku !== undefined ? String(req.body.sku).trim() : product.sku;
     const model = req.body.model !== undefined ? String(req.body.model).trim() : product.model;
     const description = req.body.description !== undefined ? String(req.body.description).trim() : product.description;
-    const brand = req.body.brand !== undefined ? String(req.body.brand).trim() : product.brand;
+    const brand = req.body.brand !== undefined ? String(req.body.brand).trim() : (product.brand || '');
     const rawFccId = req.body.productfccId !== undefined ? req.body.productfccId : req.body.fccId;
     const productfccId = rawFccId !== undefined ? String(rawFccId).trim() : (product.productfccId || '');
     const productType = req.body.productType !== undefined ? String(req.body.productType).trim() : product.productType;
     const httpLink = req.body.httpLink !== undefined ? String(req.body.httpLink).trim() : product.httpLink;
+    const nasLink = req.body.nasLink !== undefined ? String(req.body.nasLink).trim() : (product.nasLink || '');
 
     // 校验并保留原有 status，避免未传时被误重置为 active
     const statusValue =
@@ -299,13 +322,9 @@ exports.updateProduct = async (req, res) => {
       await cleanupUploadedFiles(req.files);
       return res.status(400).json({ success: false, message: '型号（Model）不能为空' });
     }
-    if (!brand) {
+    if (!isSafeExternalLink(httpLink) || !isSafeExternalLink(nasLink)) {
       await cleanupUploadedFiles(req.files);
-      return res.status(400).json({ success: false, message: '完美替代品牌不能为空' });
-    }
-    if (!productfccId) {
-      await cleanupUploadedFiles(req.files);
-      return res.status(400).json({ success: false, message: '完美替代型号（FCC ID）不能为空' });
+      return res.status(400).json({ success: false, message: '链接协议不安全，请使用合法的链接地址' });
     }
     if (!(await isValidProductStatus(statusValue))) {
       await cleanupUploadedFiles(req.files);
@@ -342,9 +361,10 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
-    // 动态处理文件路径（支持 JSON 传 null 以及 FormData 传 removeImage/removeManual）
+    // 动态处理文件路径（支持 JSON 传 null 以及 FormData 传 removeImage/removeManual/removeQaDocument）
     let imagePath = product.image;
     let manualPath = product.manual;
+    let qaDocumentPath = product.qaDocument || null;
 
     if (req.files?.image?.[0]) {
       imagePath = `/uploads/${req.files.image[0].filename}`;
@@ -358,6 +378,12 @@ exports.updateProduct = async (req, res) => {
       manualPath = null;
     }
 
+    if (req.files?.qaDocument?.[0]) {
+      qaDocumentPath = `/uploads/${req.files.qaDocument[0].filename}`;
+    } else if (req.body.qaDocument === null || req.body.removeQaDocument === 'true') {
+      qaDocumentPath = null;
+    }
+
     // 安全删除旧文件
     const isValidPath = (p) =>
       p && p.startsWith('/uploads/') && !p.includes('..');
@@ -368,6 +394,9 @@ exports.updateProduct = async (req, res) => {
       }
       if (manualPath !== product.manual && product.manual && isValidPath(product.manual)) {
         await fs.unlink(path.join(__dirname, '../public', product.manual));
+      }
+      if (qaDocumentPath !== product.qaDocument && product.qaDocument && isValidPath(product.qaDocument)) {
+        await fs.unlink(path.join(__dirname, '../public', product.qaDocument));
       }
     } catch (err) {
       console.warn('删除旧文件失败:', err.message);
@@ -381,15 +410,17 @@ exports.updateProduct = async (req, res) => {
       productfccId,
       productType,
       httpLink,
+      nasLink,
       status: statusValue,
       image: imagePath,
-      manual: manualPath
+      manual: manualPath,
+      qaDocument: qaDocumentPath
     });
 
     // 自动将新输入的品牌/产品类型写入数据库下拉选项表
     await Promise.all([
-      ensureOptionExists('brand', brand),
-      ensureOptionExists('productType', productType)
+      brand ? ensureOptionExists('brand', brand) : Promise.resolve(),
+      productType ? ensureOptionExists('productType', productType) : Promise.resolve()
     ]);
 
     res.json(product);
@@ -415,6 +446,11 @@ exports.deleteProduct = async (req, res) => {
       }
       if (product.manual) {
         const filePath = path.join(__dirname, '../public', product.manual);
+        await fs.access(filePath);
+        await fs.unlink(filePath);
+      }
+      if (product.qaDocument) {
+        const filePath = path.join(__dirname, '../public', product.qaDocument);
         await fs.access(filePath);
         await fs.unlink(filePath);
       }

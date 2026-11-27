@@ -24,15 +24,24 @@ exports.getFccs = async (req, res) => {
   const { hasPagination, page, pageSize } = parsePaginationParams(req.query, 12, 100);
 
   try {
-    const whereClause = search
-      ? {
-          [Op.or]: [
-            { name: { [Op.like]: `%${search}%` } },
-            { brand: { [Op.like]: `%${search}%` } },
-            { description: { [Op.like]: `%${search}%` } }
-          ]
-        }
-      : {};
+    let whereClause = {};
+    if (search) {
+      const tokens = search.split(/[\s+＋]+/).filter(Boolean);
+      const buildTokenClause = (token) => ({
+        [Op.or]: [
+          { name: { [Op.like]: `%${token}%` } },
+          { brand: { [Op.like]: `%${token}%` } },
+          { productType: { [Op.like]: `%${token}%` } },
+          { description: { [Op.like]: `%${token}%` } }
+        ]
+      });
+      whereClause =
+        tokens.length > 1
+          ? { [Op.and]: tokens.map(buildTokenClause) }
+          : tokens.length === 1
+            ? buildTokenClause(tokens[0])
+            : {};
+    }
 
     if (hasPagination) {
       const total = await Fcc.count({ where: whereClause });

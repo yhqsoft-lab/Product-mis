@@ -37,6 +37,10 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: true
     },
+    nasLink: {
+      type: DataTypes.STRING(500),
+      allowNull: true
+    },
     status: {
      type: DataTypes.ENUM('active', 'discontinued', 'development', 'clearance'),
      allowNull: false,
@@ -44,6 +48,10 @@ module.exports = (sequelize, DataTypes) => {
    },
 
     manual: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    qaDocument: {
       type: DataTypes.STRING,
       allowNull: true
     },

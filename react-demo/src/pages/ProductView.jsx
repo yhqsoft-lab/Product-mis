@@ -2,6 +2,8 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   ExternalLink,
   FileText,
+  FileSpreadsheet,
+  HardDrive,
   Info
 } from 'lucide-react';
 import { safeFetch } from '../utils/safeFetch';
@@ -14,6 +16,7 @@ import {
   CardGridSkeleton,
   EmptyState,
   ErrorState,
+  showAppToast,
   ProductDetailModal,
   ProductRelationModal,
   PaginationBar
@@ -301,8 +304,8 @@ export default function ProductSearch() {
                     </p>
                   </div>
 
-                  {/* 外链与说明书 */}
-                  <div className="flex items-center gap-3 text-xs">
+                  {/* 在售链接、说明书、QA文档与NAS文档链接 */}
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
                     {product.httpLink ? (
                       <a
                         href={product.httpLink}
@@ -312,12 +315,15 @@ export default function ProductSearch() {
                         title={product.httpLink}
                       >
                         <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                        产品链接
+                        在售链接
                       </a>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-slate-300 whitespace-nowrap">
+                      <span
+                        aria-disabled="true"
+                        className="inline-flex items-center gap-1 text-slate-300 cursor-not-allowed select-none whitespace-nowrap"
+                      >
                         <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                        无链接
+                        在售链接
                       </span>
                     )}
 
@@ -332,9 +338,74 @@ export default function ProductSearch() {
                         说明书
                       </a>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-slate-300 whitespace-nowrap">
+                      <span
+                        aria-disabled="true"
+                        className="inline-flex items-center gap-1 text-slate-300 cursor-not-allowed select-none whitespace-nowrap"
+                      >
                         <FileText className="w-3.5 h-3.5 shrink-0" />
-                        无说明书
+                        说明书
+                      </span>
+                    )}
+
+                    {product.qaDocument ? (
+                      <a
+                        href={formatMediaUrl(product.qaDocument, BASE_URL)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-700 font-medium whitespace-nowrap"
+                        title={product.qaDocument}
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+                        QA文档
+                      </a>
+                    ) : (
+                      <span
+                        aria-disabled="true"
+                        className="inline-flex items-center gap-1 text-slate-300 cursor-not-allowed select-none whitespace-nowrap"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+                        QA文档
+                      </span>
+                    )}
+
+                    {product.nasLink ? (
+                      /^https?:\/\//i.test(product.nasLink.trim()) ? (
+                        <a
+                          href={product.nasLink.trim()}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-sky-600 hover:text-sky-700 font-medium whitespace-nowrap"
+                          title={product.nasLink}
+                        >
+                          <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                          NAS文档链接
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (navigator.clipboard?.writeText) {
+                              navigator.clipboard.writeText(product.nasLink.trim())
+                                .then(() => showAppToast('已复制 NAS 文档路径，请打开资源管理器粘贴', 'success'))
+                                .catch(() => showAppToast(`NAS 路径：${product.nasLink.trim()}`, 'info'));
+                            } else {
+                              showAppToast(`NAS 路径：${product.nasLink.trim()}`, 'info');
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 text-sky-600 hover:text-sky-700 font-medium whitespace-nowrap text-left"
+                          title={`点击复制 NAS 路径：${product.nasLink}`}
+                        >
+                          <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                          NAS文档链接
+                        </button>
+                      )
+                    ) : (
+                      <span
+                        aria-disabled="true"
+                        className="inline-flex items-center gap-1 text-slate-300 cursor-not-allowed select-none whitespace-nowrap"
+                      >
+                        <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                        NAS文档链接
                       </span>
                     )}
                   </div>
@@ -402,12 +473,12 @@ export default function ProductSearch() {
                     </button>
                   </div>
 
-                  {/* 完美替代 */}
+                  {/* 开发原型 */}
                   <p
                     className="text-xs text-slate-600 truncate"
-                    title={`完美替代：${[product.brand, product.productfccId].filter(Boolean).join(' ') || '—'}`}
+                    title={`开发原型：${[product.brand, product.productfccId].filter(Boolean).join(' ') || '—'}`}
                   >
-                    <span className="text-slate-400">完美替代：</span>
+                    <span className="text-slate-400">开发原型：</span>
                     {product.brand || product.productfccId ? (
                       <>
                         {product.brand && (
@@ -470,7 +541,7 @@ export default function ProductSearch() {
         searchTerm={searchTerm}
         onSearchChange={handleSearchChange}
         onClearSearch={clearSearch}
-        searchPlaceholder="输入 SKU、Model、品牌或 FCC ID 搜索产品..."
+        searchPlaceholder="输入 SKU、Model 搜索..."
         searching={searching}
         loading={loading}
       />

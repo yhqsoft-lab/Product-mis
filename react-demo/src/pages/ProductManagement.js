@@ -5,6 +5,8 @@ import {
   Plus,
   ExternalLink,
   FileText,
+  FileSpreadsheet,
+  HardDrive,
   Eye,
   Link2,
   Pencil,
@@ -105,6 +107,7 @@ export default function ProductManagement() {
   // 文件状态
   const [imageFile, setImageFile] = useState(null);
   const [pdfFile, setPdfFile] = useState(null);
+  const [qaFile, setQaFile] = useState(null);
   const [preview, setPreview] = useState('');
 
   // 防止重复提交
@@ -136,8 +139,10 @@ export default function ProductManagement() {
     productfccId: '',
     model: '',
     httpLink: '',
+    nasLink: '',
     status: 'active',
-    manual: ''
+    manual: '',
+    qaDocument: ''
   });
 
   const [formErrors, setFormErrors] = useState({});
@@ -332,17 +337,34 @@ export default function ProductManagement() {
   const handlePdfChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.type !== 'application/pdf') {
+    if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
       showAppToast('请上传 PDF 文件', 'error');
       e.target.value = '';
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      showAppToast('PDF 文件不能超过 5MB', 'error');
+    if (file.size > 10 * 1024 * 1024) {
+      showAppToast('PDF 文件不能超过 10MB', 'error');
       e.target.value = '';
       return;
     }
     setPdfFile(file);
+  };
+
+  const handleQaDocChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const allowedExt = /\.(pdf|doc|docx|xls|xlsx)$/i;
+    if (!allowedExt.test(file.name)) {
+      showAppToast('QA 文档仅支持 PDF、DOC、DOCX、XLS、XLSX 格式', 'error');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      showAppToast('QA 文档不能超过 10MB', 'error');
+      e.target.value = '';
+      return;
+    }
+    setQaFile(file);
   };
 
   const openRelationsModal = (product) => {
@@ -367,12 +389,15 @@ export default function ProductManagement() {
       productfccId: '',
       model: '',
       httpLink: '',
+      nasLink: '',
       status: 'active',
-      manual: ''
+      manual: '',
+      qaDocument: ''
     });
     setPreview('');
     setImageFile(null);
     setPdfFile(null);
+    setQaFile(null);
     setCustomFields({ brand: false, productType: false });
   }, []);
 
@@ -423,22 +448,30 @@ export default function ProductManagement() {
   const isValidUrl = (url) => {
     if (!url?.trim()) return true;
     try {
-      new URL(url);
-      return true;
+      const parsed = new URL(url.trim());
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
     } catch {
       return false;
     }
+  };
+
+  const isValidNasLink = (link) => {
+    const trimmed = (link || '').trim();
+    if (!trimmed) return true;
+    if (/^(javascript|vbscript|data):/i.test(trimmed)) return false;
+    return /^(https?:\/\/|smb:\/\/|\\\\|\/)/i.test(trimmed);
   };
 
   const validateForm = () => {
     const errors = {};
     if (!newProduct.sku?.trim()) errors.sku = 'SKU 不能为空';
     if (!newProduct.model?.trim()) errors.model = 'Model 不能为空';
-    if (!newProduct.brand?.trim()) errors.brand = '请选择或输入品牌';
-    if (!newProduct.productfccId?.trim()) errors.productfccId = '型号（FCC ID）不能为空';
     if (!newProduct.productType?.trim()) errors.productType = '请选择或输入产品类型';
     if (newProduct.httpLink && !isValidUrl(newProduct.httpLink)) {
-      errors.httpLink = '请输入有效的 URL 链接';
+      errors.httpLink = '请输入有效的 http:// 或 https:// 链接';
+    }
+    if (newProduct.nasLink && !isValidNasLink(newProduct.nasLink)) {
+      errors.nasLink = '请输入有效的 NAS 链接（支持 http(s)://、smb:// 或 \\\\路径）';
     }
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -465,6 +498,7 @@ export default function ProductManagement() {
       const trimmedType = newProduct.productType.trim();
       const trimmedDesc = (newProduct.description || '').trim();
       const trimmedLink = (newProduct.httpLink || '').trim();
+      const trimmedNasLink = (newProduct.nasLink || '').trim();
       const statusVal = newProduct.status || 'active';
 
       const [skuDupMsg, modelDupMsg] = await Promise.all([
@@ -482,7 +516,7 @@ export default function ProductManagement() {
         return;
       }
 
-      const hasNewFiles = imageFile || pdfFile;
+      const hasNewFiles = imageFile || pdfFile || qaFile;
       const isEditing = !!editingProduct;
       const url = isEditing ? `${API_PRODUCTS}/${newProduct.id}` : API_PRODUCTS;
 
@@ -497,6 +531,7 @@ export default function ProductManagement() {
         formData.append('productType', trimmedType);
         formData.append('status', statusVal);
         formData.append('httpLink', trimmedLink);
+        formData.append('nasLink', trimmedNasLink);
         if (imageFile) {
           formData.append('image', imageFile);
         } else if (isEditing && newProduct.image === null) {
@@ -506,6 +541,11 @@ export default function ProductManagement() {
           formData.append('manual', pdfFile);
         } else if (isEditing && newProduct.manual === null) {
           formData.append('removeManual', 'true');
+        }
+        if (qaFile) {
+          formData.append('qaDocument', qaFile);
+        } else if (isEditing && newProduct.qaDocument === null) {
+          formData.append('removeQaDocument', 'true');
         }
 
         response = await safeFetch(url, {
@@ -522,7 +562,8 @@ export default function ProductManagement() {
           productfccId: trimmedFccId,
           productType: trimmedType,
           status: statusVal,
-          httpLink: trimmedLink
+          httpLink: trimmedLink,
+          nasLink: trimmedNasLink
         };
 
         if (isEditing) {
@@ -531,6 +572,9 @@ export default function ProductManagement() {
 
           if (newProduct.manual === null) jsonData.manual = null;
           else if (newProduct._hasManual) jsonData.manual = newProduct.manual;
+
+          if (newProduct.qaDocument === null) jsonData.qaDocument = null;
+          else if (newProduct._hasQaDocument) jsonData.qaDocument = newProduct.qaDocument;
         }
 
         response = await safeFetch(url, {
@@ -584,12 +628,15 @@ export default function ProductManagement() {
     setFormErrors({});
     setImageFile(null);
     setPdfFile(null);
+    setQaFile(null);
     setNewProduct({
       ...product,
       productfccId: product.productfccId || '',
+      nasLink: product.nasLink || '',
       status: product.status || 'active',
       _hasImage: !!product.image,
-      _hasManual: !!product.manual
+      _hasManual: !!product.manual,
+      _hasQaDocument: !!product.qaDocument
     });
     const presetBrands = BRAND_OPTIONS.map((o) => o.value).filter((v) => v && v !== 'Others');
     const presetTypes = PRODUCT_TYPE_OPTIONS.map((o) => o.value).filter((v) => v && v !== 'Others');
@@ -741,8 +788,8 @@ export default function ProductManagement() {
                     </p>
                   </div>
 
-                  {/* 外链与说明书 */}
-                  <div className="flex items-center gap-3 text-xs">
+                  {/* 在售链接、说明书、QA文档与NAS文档链接 */}
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
                     {product.httpLink ? (
                       <a
                         href={product.httpLink}
@@ -752,12 +799,15 @@ export default function ProductManagement() {
                         title={product.httpLink}
                       >
                         <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                        产品链接
+                        在售链接
                       </a>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-slate-300 whitespace-nowrap">
+                      <span
+                        aria-disabled="true"
+                        className="inline-flex items-center gap-1 text-slate-300 cursor-not-allowed select-none whitespace-nowrap"
+                      >
                         <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                        无链接
+                        在售链接
                       </span>
                     )}
 
@@ -772,9 +822,74 @@ export default function ProductManagement() {
                         说明书
                       </a>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-slate-300 whitespace-nowrap">
+                      <span
+                        aria-disabled="true"
+                        className="inline-flex items-center gap-1 text-slate-300 cursor-not-allowed select-none whitespace-nowrap"
+                      >
                         <FileText className="w-3.5 h-3.5 shrink-0" />
-                        无说明书
+                        说明书
+                      </span>
+                    )}
+
+                    {product.qaDocument ? (
+                      <a
+                        href={formatMediaUrl(product.qaDocument, BASE_URL)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-700 font-medium whitespace-nowrap"
+                        title={product.qaDocument}
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+                        QA文档
+                      </a>
+                    ) : (
+                      <span
+                        aria-disabled="true"
+                        className="inline-flex items-center gap-1 text-slate-300 cursor-not-allowed select-none whitespace-nowrap"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+                        QA文档
+                      </span>
+                    )}
+
+                    {product.nasLink ? (
+                      /^https?:\/\//i.test(product.nasLink.trim()) ? (
+                        <a
+                          href={product.nasLink.trim()}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-sky-600 hover:text-sky-700 font-medium whitespace-nowrap"
+                          title={product.nasLink}
+                        >
+                          <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                          NAS文档链接
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (navigator.clipboard?.writeText) {
+                              navigator.clipboard.writeText(product.nasLink.trim())
+                                .then(() => showAppToast('已复制 NAS 文档路径，请打开资源管理器粘贴', 'success'))
+                                .catch(() => showAppToast(`NAS 路径：${product.nasLink.trim()}`, 'info'));
+                            } else {
+                              showAppToast(`NAS 路径：${product.nasLink.trim()}`, 'info');
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 text-sky-600 hover:text-sky-700 font-medium whitespace-nowrap text-left"
+                          title={`点击复制 NAS 路径：${product.nasLink}`}
+                        >
+                          <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                          NAS文档链接
+                        </button>
+                      )
+                    ) : (
+                      <span
+                        aria-disabled="true"
+                        className="inline-flex items-center gap-1 text-slate-300 cursor-not-allowed select-none whitespace-nowrap"
+                      >
+                        <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                        NAS文档链接
                       </span>
                     )}
                   </div>
@@ -842,12 +957,12 @@ export default function ProductManagement() {
                     </button>
                   </div>
 
-                  {/* 完美替代 */}
+                  {/* 开发原型 */}
                   <p
                     className="text-xs text-slate-600 truncate"
-                    title={`完美替代：${[product.brand, product.productfccId].filter(Boolean).join(' ') || '—'}`}
+                    title={`开发原型：${[product.brand, product.productfccId].filter(Boolean).join(' ') || '—'}`}
                   >
-                    <span className="text-slate-400">完美替代：</span>
+                    <span className="text-slate-400">开发原型：</span>
                     {product.brand || product.productfccId ? (
                       <>
                         {product.brand && (
@@ -938,7 +1053,7 @@ export default function ProductManagement() {
         searchTerm={searchTerm}
         onSearchChange={handleSearchChange}
         onClearSearch={clearSearch}
-        searchPlaceholder="输入 SKU、Model、品牌或 FCC ID 搜索产品..."
+        searchPlaceholder="输入 SKU、Model 搜索..."
         searching={searching}
         loading={loading}
         actionButton={
@@ -1042,15 +1157,15 @@ export default function ProductManagement() {
                     {formErrors.model && <p className="text-rose-600 text-xs mt-1">{formErrors.model}</p>}
                   </div>
 
-                  {/* 完美替代（单独一行：品牌 + 型号（FCC ID），均为必填） */}
+                  {/* 开发原型（单独一行：品牌与型号（FCC ID）均选填） */}
                   <div className="md:col-span-2 p-3.5 bg-slate-50/70 border border-slate-200 rounded-lg">
                     <label className="block text-xs font-semibold text-slate-700 mb-2.5">
-                      完美替代 <span className="text-rose-500">*</span>
+                      开发原型
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">
-                          品牌 <span className="text-rose-500">*</span>
+                          品牌 <span className="text-slate-400 font-normal">（选填）</span>
                         </label>
                         {!customFields.brand ? (
                           <select
@@ -1098,7 +1213,7 @@ export default function ProductManagement() {
 
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">
-                          型号（FCC ID） <span className="text-rose-500">*</span>
+                          型号（FCC ID） <span className="text-slate-400 font-normal">（选填）</span>
                         </label>
                         <input
                           type="text"
@@ -1108,7 +1223,7 @@ export default function ProductManagement() {
                           className={`w-full h-10 px-3 text-sm font-mono bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
                             formErrors.productfccId ? 'border-rose-400' : 'border-slate-200'
                           }`}
-                          placeholder="请输入型号（FCC ID）"
+                          placeholder="请输入型号（FCC ID，选填）"
                         />
                         {formErrors.productfccId && (
                           <p className="text-rose-600 text-xs mt-1">{formErrors.productfccId}</p>
@@ -1184,9 +1299,9 @@ export default function ProductManagement() {
                     </select>
                   </div>
 
-                  <div className="md:col-span-2">
+                  <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                      产品链接
+                      产品在售链接
                     </label>
                     <input
                       type="url"
@@ -1200,6 +1315,25 @@ export default function ProductManagement() {
                     />
                     {formErrors.httpLink && (
                       <p className="text-rose-600 text-xs mt-1">{formErrors.httpLink}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                      NAS 文档链接
+                    </label>
+                    <input
+                      type="text"
+                      name="nasLink"
+                      value={newProduct.nasLink || ''}
+                      onChange={handleInputChange}
+                      className={`w-full h-10 px-3 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                        formErrors.nasLink ? 'border-rose-400' : 'border-slate-200'
+                      }`}
+                      placeholder="https://nas.example.com/... 或 \\\\192.168.1.10\\docs（可选）"
+                    />
+                    {formErrors.nasLink && (
+                      <p className="text-rose-600 text-xs mt-1">{formErrors.nasLink}</p>
                     )}
                   </div>
                 </div>
@@ -1278,7 +1412,7 @@ export default function ProductManagement() {
                             id="pdf-upload"
                           />
                         </label>
-                        <span className="text-xs text-slate-400">PDF 格式，≤ 5MB</span>
+                        <span className="text-xs text-slate-400">PDF 格式，≤ 10MB</span>
                       </div>
 
                       {pdfFile && (
@@ -1323,6 +1457,76 @@ export default function ProductManagement() {
                               if (inputEl) inputEl.value = '';
                             }}
                             aria-label="移除说明书"
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors shrink-0"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* QA 文档（PDF / DOC / DOCX / XLS / XLSX） */}
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">QA 文档</label>
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 border border-slate-200 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-100 transition-colors whitespace-nowrap">
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                          <span>选择 QA 文档</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.doc,.docx,.xls,.xlsx"
+                            onChange={handleQaDocChange}
+                            className="hidden"
+                            id="qa-doc-upload"
+                          />
+                        </label>
+                        <span className="text-xs text-slate-400">支持 PDF、DOC、DOCX、XLS、XLSX，≤ 10MB</span>
+                      </div>
+
+                      {qaFile && (
+                        <div className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-slate-700 truncate">{qaFile.name}</p>
+                            <p className="text-[11px] text-slate-400 tabular-nums">
+                              {(qaFile.size / 1024).toFixed(1)} KB
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQaFile(null);
+                              const inputEl = document.getElementById('qa-doc-upload');
+                              if (inputEl) inputEl.value = '';
+                            }}
+                            aria-label="移除 QA 文档"
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors shrink-0"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+
+                      {!qaFile && newProduct.qaDocument && (
+                        <div className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                          <a
+                            href={formatMediaUrl(newProduct.qaDocument, BASE_URL)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-indigo-600 hover:underline truncate"
+                          >
+                            {newProduct.qaDocument}
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQaFile(null);
+                              setNewProduct((prev) => ({ ...prev, qaDocument: null, _hasQaDocument: false }));
+                              const inputEl = document.getElementById('qa-doc-upload');
+                              if (inputEl) inputEl.value = '';
+                            }}
+                            aria-label="移除 QA 文档"
                             className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors shrink-0"
                           >
                             <X className="w-4 h-4" />

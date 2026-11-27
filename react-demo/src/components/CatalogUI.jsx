@@ -7,6 +7,9 @@ import {
   AlertCircle,
   RotateCw,
   FileText,
+  FileSpreadsheet,
+  HardDrive,
+  Copy,
   Package,
   ExternalLink,
   ShoppingCart,
@@ -19,6 +22,16 @@ export const formatMediaUrl = (path, baseUrl = '') => {
   if (path.startsWith('http') || path.startsWith('data:')) return path;
   return `${baseUrl}${path.startsWith('/') ? path : '/' + path}`;
 };
+
+const getFileExtensionLabel = (filePath) => {
+  if (!filePath || typeof filePath !== 'string') return '';
+  const clean = filePath.split('?')[0].split('#')[0];
+  const parts = clean.split('.');
+  if (parts.length < 2) return '';
+  return parts[parts.length - 1].toUpperCase();
+};
+
+const isHttpLink = (val) => typeof val === 'string' && /^https?:\/\//i.test(val.trim());
 
 export const getStatusMeta = (status) => {
   if (status === 'active') {
@@ -342,6 +355,25 @@ export function ProductDetailModal({
             </div>
           </div>
 
+          {/* 开发原型框（品牌 + 型号（FCC ID）） */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1.5">开发原型</label>
+            <div className="p-3.5 bg-white border border-slate-200 rounded-lg grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="min-w-0">
+                <span className="block text-xs text-slate-400 mb-1">品牌</span>
+                <p className="text-sm font-medium text-slate-900 break-words">
+                  {product.brand || '—'}
+                </p>
+              </div>
+              <div className="min-w-0">
+                <span className="block text-xs text-slate-400 mb-1">型号（FCC ID）</span>
+                <p className="text-sm font-mono tabular-nums text-slate-800 break-words">
+                  {product.productfccId || '—'}
+                </p>
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">描述信息</label>
             <p className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 min-h-[76px] whitespace-pre-wrap leading-relaxed">
@@ -351,22 +383,71 @@ export function ProductDetailModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">产品外链</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">产品在售链接</label>
               <div className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm truncate">
                 {product.httpLink ? (
                   <a
                     href={product.httpLink}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-indigo-600 hover:underline"
+                    className="text-indigo-600 hover:underline inline-flex items-center gap-1.5 max-w-full"
+                    title={product.httpLink}
                   >
-                    {product.httpLink}
+                    <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{product.httpLink}</span>
                   </a>
                 ) : (
                   <span className="text-slate-400">无</span>
                 )}
               </div>
             </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">NAS 文档链接</label>
+              <div className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm flex items-center justify-between gap-2 min-w-0">
+                {product.nasLink ? (
+                  isHttpLink(product.nasLink) ? (
+                    <a
+                      href={product.nasLink.trim()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sky-600 hover:underline inline-flex items-center gap-1.5 min-w-0 flex-1"
+                      title={product.nasLink}
+                    >
+                      <HardDrive className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{product.nasLink.trim()}</span>
+                    </a>
+                  ) : (
+                    <>
+                      <span
+                        className="font-mono text-xs text-slate-700 truncate flex-1"
+                        title={product.nasLink}
+                      >
+                        {product.nasLink.trim()}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (navigator.clipboard?.writeText) {
+                            navigator.clipboard.writeText(product.nasLink.trim())
+                              .then(() => showAppToast('已复制 NAS 文档路径，请打开资源管理器粘贴', 'success'))
+                              .catch(() => showAppToast('复制失败，请手动复制', 'error'));
+                          }
+                        }}
+                        title="复制 NAS 路径"
+                        aria-label="复制 NAS 路径"
+                        className="p-1 text-slate-400 hover:text-indigo-600 rounded hover:bg-slate-100 transition-colors shrink-0"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )
+                ) : (
+                  <span className="text-slate-400">无</span>
+                )}
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">说明书 (PDF)</label>
               <div className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm truncate">
@@ -379,6 +460,31 @@ export function ProductDetailModal({
                   >
                     <FileText className="w-4 h-4 shrink-0" />
                     查看 PDF 说明书
+                  </a>
+                ) : (
+                  <span className="text-slate-400">无</span>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">QA 文档</label>
+              <div className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm truncate">
+                {product.qaDocument ? (
+                  <a
+                    href={formatMediaUrl(product.qaDocument, baseUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-600 hover:underline inline-flex items-center gap-1.5"
+                    title={product.qaDocument}
+                  >
+                    <FileSpreadsheet className="w-4 h-4 shrink-0" />
+                    <span>
+                      查看 / 下载 QA 文档
+                      {getFileExtensionLabel(product.qaDocument)
+                        ? ` (${getFileExtensionLabel(product.qaDocument)})`
+                        : ''}
+                    </span>
                   </a>
                 ) : (
                   <span className="text-slate-400">无</span>
@@ -457,24 +563,6 @@ export function ProductDetailModal({
                   </div>
                 </div>
               ))}
-              <div className="border-t border-slate-100 pt-3 flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
-                <span className="text-xs font-medium text-slate-500 w-24 shrink-0">
-                  完美替代
-                </span>
-                <div className="flex-1 min-w-0 text-sm text-slate-800 break-words">
-                  {product.brand || product.productfccId ? (
-                    <>
-                      {product.brand && <span className="font-medium text-slate-900">{product.brand}</span>}
-                      {product.brand && product.productfccId && ' '}
-                      {product.productfccId && (
-                        <span className="font-mono tabular-nums text-slate-700">{product.productfccId}</span>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-slate-400">无</span>
-                  )}
-                </div>
-              </div>
             </div>
           </div>
 
@@ -987,8 +1075,8 @@ export function FccDetailModal({ fcc, onClose, baseUrl = '' }) {
                                     fallbackText="暂无图片"
                                   />
                                 </div>
-                                {(p.httpLink || p.manual) && (
-                                  <div className="flex items-center gap-3 text-xs">
+                                {(p.httpLink || p.manual || p.qaDocument || p.nasLink) && (
+                                  <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs">
                                     {p.httpLink && (
                                       <a
                                         href={p.httpLink}
@@ -997,7 +1085,7 @@ export function FccDetailModal({ fcc, onClose, baseUrl = '' }) {
                                         className="inline-flex items-center gap-1 text-indigo-600 hover:underline font-medium"
                                       >
                                         <ExternalLink className="w-3.5 h-3.5" />
-                                        产品链接
+                                        产品在售链接
                                       </a>
                                     )}
                                     {p.manual && (
@@ -1010,6 +1098,46 @@ export function FccDetailModal({ fcc, onClose, baseUrl = '' }) {
                                         <FileText className="w-3.5 h-3.5" />
                                         说明书
                                       </a>
+                                    )}
+                                    {p.qaDocument && (
+                                      <a
+                                        href={formatMediaUrl(p.qaDocument, baseUrl)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-emerald-600 hover:underline font-medium"
+                                      >
+                                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                                        QA文档
+                                      </a>
+                                    )}
+                                    {p.nasLink && (
+                                      isHttpLink(p.nasLink) ? (
+                                        <a
+                                          href={p.nasLink.trim()}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 text-sky-600 hover:underline font-medium"
+                                        >
+                                          <HardDrive className="w-3.5 h-3.5" />
+                                          NAS文档
+                                        </a>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (navigator.clipboard?.writeText) {
+                                              navigator.clipboard.writeText(p.nasLink.trim())
+                                                .then(() => showAppToast('已复制 NAS 文档路径，请打开资源管理器粘贴', 'success'))
+                                                .catch(() => showAppToast(`NAS 路径：${p.nasLink.trim()}`, 'info'));
+                                            }
+                                          }}
+                                          className="inline-flex items-center gap-1 text-sky-600 hover:underline font-medium"
+                                          title={p.nasLink}
+                                        >
+                                          <HardDrive className="w-3.5 h-3.5" />
+                                          NAS文档
+                                        </button>
+                                      )
                                     )}
                                   </div>
                                 )}

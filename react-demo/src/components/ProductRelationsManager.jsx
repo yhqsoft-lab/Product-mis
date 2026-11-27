@@ -186,17 +186,14 @@ const ProductRelationsManager = ({
   // 未关联的可选产品（支持关键词搜索）
   const unlinkedProducts = useMemo(() => {
     const relatedIds = new Set(relations.map((r) => Number(r.targetProduct.id)));
-    const keyword = pickerSearch.trim().toLowerCase();
+    const tokens = pickerSearch.trim().toLowerCase().split(/[\s+＋]+/).filter(Boolean);
 
     return availableProducts.filter((p) => {
       if (relatedIds.has(Number(p.id))) return false;
-      if (!keyword) return true;
-      return (
-        String(p.model || '').toLowerCase().includes(keyword) ||
-        String(p.sku || '').toLowerCase().includes(keyword) ||
-        String(p.brand || '').toLowerCase().includes(keyword) ||
-        String(p.productType || '').toLowerCase().includes(keyword)
-      );
+      if (tokens.length === 0) return true;
+      const haystack = [p.model, p.sku, p.brand, p.productfccId, p.productType]
+        .map((v) => String(v || '').toLowerCase());
+      return tokens.every((token) => haystack.some((field) => field.includes(token)));
     });
   }, [availableProducts, relations, pickerSearch]);
 

@@ -193,10 +193,10 @@ export default function ProductCatalog() {
                       </p>
                     </div>
 
-                    {/* 产品链接 (原 httpLink) */}
+                    {/* 产品在售链接 (原 httpLink) */}
                     {product.httpLink && (
                       <div className="mb-6">
-                        <h2 className="text-lg font-semibold text-gray-800 mb-2">产品链接</h2>
+                        <h2 className="text-lg font-semibold text-gray-800 mb-2">产品在售链接</h2>
                         <a
                           href={formatUrl(product.httpLink)}
                           target="_blank"

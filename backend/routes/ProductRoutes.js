@@ -7,7 +7,8 @@ const { authMiddleware, editorMiddleware, adminMiddleware } = require('../middle
 
 const ProductUpload = upload.fields([
   { name: 'image', maxCount: 1 },
-  { name: 'manual', maxCount: 1 }
+  { name: 'manual', maxCount: 1 },
+  { name: 'qaDocument', maxCount: 1 }
 ]);
 
 // ✅ 公开：获取产品列表（product catalog）

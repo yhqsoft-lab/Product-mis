@@ -14,11 +14,13 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
+    const ext = path.extname(file.originalname).toLowerCase();
     const uniqueSuffix = Date.now() + '-' + Math.floor(Math.random() * 1000);
 
     if (file.fieldname === 'manual') {
       cb(null, 'manual-' + uniqueSuffix + ext);
+    } else if (file.fieldname === 'qaDocument') {
+      cb(null, 'qa-' + uniqueSuffix + ext);
     } else {
       cb(null, 'image-' + uniqueSuffix + ext);
     }
@@ -26,13 +28,32 @@ const storage = multer.diskStorage({
 });
 
 const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const ALLOWED_QA_EXTS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx'];
+const ALLOWED_QA_MIMES = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-office',
+  'application/octet-stream'
+];
 
 const fileFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname || '').toLowerCase();
+
   if (file.fieldname === 'manual') {
-    if (file.mimetype === 'application/pdf') {
+    if (file.mimetype === 'application/pdf' || ext === '.pdf') {
       return cb(null, true);
     }
     return cb(new Error('说明书仅允许上传 PDF 文件'), false);
+  }
+
+  if (file.fieldname === 'qaDocument') {
+    if (ALLOWED_QA_EXTS.includes(ext) && ALLOWED_QA_MIMES.includes(file.mimetype)) {
+      return cb(null, true);
+    }
+    return cb(new Error('QA 文档仅允许上传 PDF、DOC、DOCX、XLS 或 XLSX 文件'), false);
   }
 
   if (file.fieldname === 'image') {
@@ -51,7 +72,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB 限制
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB 限制
 });
 
 // ✅ 导出完整的 multer 实例（不是 single）

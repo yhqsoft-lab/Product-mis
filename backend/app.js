@@ -129,7 +129,7 @@ app.use((err, req, res, next) => {
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
         success: false,
-        message: '文件大小不能超过 5MB',
+        message: '文件大小不能超过 10MB',
         error: 'FILE_SIZE_LIMIT_EXCEEDED'
       });
     }
@@ -148,7 +148,7 @@ app.use((err, req, res, next) => {
   }
 
   // 自定义文件类型错误
-  if (err.message?.includes('PDF') || err.message?.includes('图片')) {
+  if (err.message?.includes('PDF') || err.message?.includes('图片') || err.message?.includes('QA')) {
     return res.status(400).json({
       success: false,
       message: err.message,
@@ -221,6 +221,20 @@ const startServer = async () => {
             "ALTER TABLE `products` MODIFY COLUMN `status` ENUM('active','discontinued','development','clearance') NOT NULL DEFAULT 'active'"
           );
           console.log('✅ 已自动更新 products.status 枚举（补充 clearance）');
+        }
+
+        if (!colNames.includes('nasLink')) {
+          await sequelize.query(
+            'ALTER TABLE `products` ADD COLUMN `nasLink` VARCHAR(500) NULL AFTER `httpLink`'
+          );
+          console.log('✅ 已自动为 products 表添加 nasLink 字段');
+        }
+
+        if (!colNames.includes('qaDocument')) {
+          await sequelize.query(
+            'ALTER TABLE `products` ADD COLUMN `qaDocument` VARCHAR(255) NULL AFTER `manual`'
+          );
+          console.log('✅ 已自动为 products 表添加 qaDocument 字段');
         }
       } catch (migrateErr) {
         console.warn('⚠️ 自动校验 products 表字段失败:', migrateErr.message);
