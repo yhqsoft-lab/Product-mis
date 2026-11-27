@@ -154,7 +154,7 @@ const fccProductsLinks = [
 const productRelations = [
   { source_product_id: 1, target_product_id: 2, relation_type: 'compatible' },
   { source_product_id: 1, target_product_id: 4, relation_type: 'upgrade' },
-  { source_product_id: 1, target_product_id: 3, relation_type: 'replacement' },
+  { source_product_id: 1, target_product_id: 3, relation_type: 'mutual_replacement' },
   { source_product_id: 2, target_product_id: 1, relation_type: 'compatible' }
 ];
 
@@ -276,6 +276,9 @@ function wrapProduct(raw, extras = {}) {
     },
     async getUpgradeProducts() {
       return getRelated(raw.id, 'upgrade').map((p) => wrapProduct(p));
+    },
+    async getMutualReplacementProducts() {
+      return getRelated(raw.id, 'mutual_replacement').map((p) => wrapProduct(p));
     },
     async getReplacementProducts() {
       return getRelated(raw.id, 'replacement').map((p) => wrapProduct(p));
@@ -420,6 +423,10 @@ const Product = {
             );
           } else if (inc.as === 'upgradeProducts') {
             extras.upgradeProducts = getRelated(p.id, 'upgrade').map((r) =>
+              pickAttributes(r, inc.attributes)
+            );
+          } else if (inc.as === 'mutualReplacementProducts') {
+            extras.mutualReplacementProducts = getRelated(p.id, 'mutual_replacement').map((r) =>
               pickAttributes(r, inc.attributes)
             );
           } else if (inc.as === 'replacementProducts') {
@@ -623,7 +630,17 @@ const sequelize = {
     return fn({});
   },
   async query(sql, options = {}) {
-    const normalized = String(sql).trim().toUpperCase();
+    const rawSql = String(sql).trim();
+    const normalized = rawSql.replace(/\s+/g, ' ').toUpperCase();
+    const parseAllowedTypes = () => {
+      const match = rawSql.match(/relation_type\s+IN\s*\(([^)]+)\)/i);
+      if (!match) return null;
+      return match[1]
+        .split(',')
+        .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
+        .filter(Boolean);
+    };
+
     if (normalized.startsWith('SHOW TABLES')) {
       return [[
         { Tables_in_mock: 'users' },
@@ -634,26 +651,99 @@ const sequelize = {
         { Tables_in_mock: 'dropdown_options' }
       ]];
     }
+
+    if (normalized.startsWith('SELECT') && normalized.includes('FROM PRODUCT_RELATIONS')) {
+      const allowedTypes = parseAllowedTypes();
+      const hasSourceFilter = normalized.includes('WHERE SOURCE_PRODUCT_ID = ?');
+      const sourceId = hasSourceFilter ? Number(options.replacements?.[0]) : null;
+      const rows = productRelations
+        .filter((r) => {
+          if (hasSourceFilter && Number(r.source_product_id) !== sourceId) return false;
+          if (allowedTypes && !allowedTypes.includes(r.relation_type)) return false;
+          return true;
+        })
+        .map((r) => ({ ...r }));
+      return [rows];
+    }
+
     if (normalized.startsWith('DELETE FROM PRODUCT_RELATIONS')) {
-      const sourceId = Number(options.replacements?.[0]);
+      const allowedTypes = parseAllowedTypes();
+      const vals = options.replacements || [];
+
+      if (normalized.includes('WHERE SOURCE_PRODUCT_ID = ? OR TARGET_PRODUCT_ID = ?')) {
+        const srcId = Number(vals[0]);
+        const tgtId = Number(vals[1]);
+        let affected = 0;
+        for (let i = productRelations.length - 1; i >= 0; i--) {
+          if (
+            Number(productRelations[i].source_product_id) === srcId ||
+            Number(productRelations[i].target_product_id) === tgtId
+          ) {
+            productRelations.splice(i, 1);
+            affected++;
+          }
+        }
+        return [{ affectedRows: affected }];
+      }
+
+      if (normalized.includes('WHERE TARGET_PRODUCT_ID = ? AND SOURCE_PRODUCT_ID IN')) {
+        const targetId = Number(vals[0]);
+        const sourceIdSet = new Set(vals.slice(1).map((v) => Number(v)));
+        let affected = 0;
+        for (let i = productRelations.length - 1; i >= 0; i--) {
+          const r = productRelations[i];
+          if (
+            Number(r.target_product_id) === targetId &&
+            sourceIdSet.has(Number(r.source_product_id)) &&
+            (!allowedTypes || allowedTypes.includes(r.relation_type))
+          ) {
+            productRelations.splice(i, 1);
+            affected++;
+          }
+        }
+        return [{ affectedRows: affected }];
+      }
+
+      const sourceId = Number(vals[0]);
+      let affected = 0;
       for (let i = productRelations.length - 1; i >= 0; i--) {
-        if (Number(productRelations[i].source_product_id) === sourceId) {
+        const r = productRelations[i];
+        if (
+          Number(r.source_product_id) === sourceId &&
+          (!allowedTypes || allowedTypes.includes(r.relation_type))
+        ) {
           productRelations.splice(i, 1);
+          affected++;
         }
       }
-      return [{ affectedRows: 1 }];
+      return [{ affectedRows: affected }];
     }
+
     if (normalized.startsWith('INSERT INTO PRODUCT_RELATIONS')) {
       const vals = options.replacements || [];
+      let inserted = 0;
       for (let i = 0; i < vals.length; i += 3) {
-        productRelations.push({
-          source_product_id: Number(vals[i]),
-          target_product_id: Number(vals[i + 1]),
-          relation_type: vals[i + 2]
-        });
+        const src = Number(vals[i]);
+        const tgt = Number(vals[i + 1]);
+        const type = vals[i + 2];
+        const exists = productRelations.some(
+          (r) =>
+            Number(r.source_product_id) === src &&
+            Number(r.target_product_id) === tgt &&
+            r.relation_type === type
+        );
+        if (!exists) {
+          productRelations.push({
+            source_product_id: src,
+            target_product_id: tgt,
+            relation_type: type
+          });
+          inserted++;
+        }
       }
-      return [{ affectedRows: vals.length / 3 }];
+      return [{ affectedRows: inserted }];
     }
+
     return [[]];
   }
 };

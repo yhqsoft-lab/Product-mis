@@ -27,6 +27,7 @@ const ProductRoutes = require('./routes/ProductRoutes');
 const LoginRoutes = require('./routes/authRoutes');
 const OptionRoutes = require('./routes/OptionRoutes');
 const { syncInitialOptions } = require('./controllers/OptionController');
+const { syncSymmetricProductRelations } = require('./controllers/ProductController');
 
 // ✅ 安全中间件（注意顺序！）
 app.use(morgan('dev'));
@@ -224,10 +225,28 @@ const startServer = async () => {
       } catch (migrateErr) {
         console.warn('⚠️ 自动校验 products 表字段失败:', migrateErr.message);
       }
+
+      // ✅ 自动扩展 product_relations.relation_type 以支持 mutual_replacement（互替代）
+      try {
+        const [relCols] = await sequelize.query("SHOW COLUMNS FROM `product_relations` LIKE 'relation_type'");
+        const relTypeCol = Array.isArray(relCols) ? relCols[0] : null;
+        const typeStr = String(relTypeCol?.Type || '').toLowerCase();
+        if (typeStr.startsWith('enum(') && !typeStr.includes('mutual_replacement')) {
+          await sequelize.query(
+            "ALTER TABLE `product_relations` MODIFY COLUMN `relation_type` ENUM('compatible','upgrade','replacement','mutual_replacement') NOT NULL"
+          );
+          console.log('✅ 已自动扩展 product_relations.relation_type 枚举（补充 mutual_replacement）');
+        }
+      } catch (relMigrateErr) {
+        console.warn('⚠️ 自动校验 product_relations 表字段失败:', relMigrateErr.message);
+      }
     }
 
     // ✅ 初始化并同步数据库下拉选项表（dropdown_options）
     await syncInitialOptions();
+
+    // ✅ 幂等补齐历史单向的「互匹配」「互替代」双向关联记录
+    await syncSymmetricProductRelations();
 
     const [tables] = await sequelize.query('SHOW TABLES');
     if (tables.length > 0) {

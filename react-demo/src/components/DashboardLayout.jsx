@@ -108,13 +108,13 @@ export default function DashboardLayout({ children, pageTitle }) {
   const visibleNavGroups = useMemo(() => {
     return NAV_GROUPS.map((group) => {
       if (group.label !== '后台管理') return group;
-      if (!isAdminRoute || !canAccessAdmin) return null;
+      if (!canAccessAdmin) return null;
       const items = group.items.filter(
         (item) => !item.roles || item.roles.includes(user?.role)
       );
       return items.length > 0 ? { ...group, items } : null;
     }).filter(Boolean);
-  }, [isAdminRoute, canAccessAdmin, user?.role]);
+  }, [canAccessAdmin, user?.role]);
 
   const footerContextValue = useMemo(() => ({ setFooterRight }), []);
 
@@ -302,14 +302,14 @@ export default function DashboardLayout({ children, pageTitle }) {
           ) : (
             <Link
               to="/login"
-              title={collapsed ? '登录后台' : undefined}
+              title={collapsed ? '登录' : undefined}
               className={`flex items-center min-h-[40px] rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 ${
                 collapsed ? 'justify-center px-2' : 'gap-3 px-3'
               }`}
             >
               <LogIn className="h-4 w-4 shrink-0 text-slate-500" />
               {!collapsed && (
-                <span className="whitespace-nowrap">登录后台</span>
+                <span className="whitespace-nowrap">账号登录</span>
               )}
             </Link>
           )}
@@ -427,7 +427,7 @@ export default function DashboardLayout({ children, pageTitle }) {
                 onClick={() => navigate('/login')}
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2"
               >
-                <span>后台登录</span>
+                <span>登录</span>
               </button>
             ) : null}
           </div>

@@ -16,35 +16,52 @@ import { formatMediaUrl, MediaThumb, showAppToast } from './CatalogUI';
 const RELATION_TYPES = [
   {
     id: 'compatible',
-    label: '可匹配',
-    fullName: '可匹配产品',
+    label: '互匹配',
+    directionHint: '双向',
+    fullName: '互匹配产品',
     textClass: 'text-emerald-700',
     activeTabClass: 'bg-emerald-50 text-emerald-700 border-emerald-300',
     selectClass: 'text-emerald-700 border-emerald-200 bg-emerald-50/50'
   },
   {
+    id: 'mutual_replacement',
+    label: '互替代',
+    directionHint: '双向',
+    fullName: '互替代产品',
+    textClass: 'text-sky-700',
+    activeTabClass: 'bg-sky-50 text-sky-700 border-sky-300',
+    selectClass: 'text-sky-700 border-sky-200 bg-sky-50/50'
+  },
+  {
+    id: 'replacement',
+    label: '可替代',
+    directionHint: '单向',
+    fullName: '可替代产品',
+    textClass: 'text-amber-700',
+    activeTabClass: 'bg-amber-50 text-amber-700 border-amber-300',
+    selectClass: 'text-amber-700 border-amber-200 bg-amber-50/50'
+  },
+  {
     id: 'upgrade',
     label: '升级款',
+    directionHint: '单向',
     fullName: '升级款产品',
     textClass: 'text-indigo-700',
     activeTabClass: 'bg-indigo-50 text-indigo-700 border-indigo-300',
     selectClass: 'text-indigo-700 border-indigo-200 bg-indigo-50/50'
-  },
-  {
-    id: 'replacement',
-    label: '可替换',
-    fullName: '可替换产品',
-    textClass: 'text-amber-700',
-    activeTabClass: 'bg-amber-50 text-amber-700 border-amber-300',
-    selectClass: 'text-amber-700 border-amber-200 bg-amber-50/50'
   }
 ];
 
 const parseRelationsData = (rawData) => {
   const source = rawData?.success && rawData?.data ? rawData.data : rawData || {};
   const compatibleData = Array.isArray(source.compatible) ? source.compatible : [];
-  const upgradeData = Array.isArray(source.upgrade) ? source.upgrade : [];
+  const mutualReplacementData = Array.isArray(source.mutualReplacement)
+    ? source.mutualReplacement
+    : Array.isArray(source.mutual_replacement)
+      ? source.mutual_replacement
+      : [];
   const replacementData = Array.isArray(source.replacement) ? source.replacement : [];
+  const upgradeData = Array.isArray(source.upgrade) ? source.upgrade : [];
 
   const seenIds = new Set();
   const result = [];
@@ -59,8 +76,9 @@ const parseRelationsData = (rawData) => {
   };
 
   append(compatibleData, 'compatible');
-  append(upgradeData, 'upgrade');
+  append(mutualReplacementData, 'mutual_replacement');
   append(replacementData, 'replacement');
+  append(upgradeData, 'upgrade');
 
   return result;
 };
@@ -184,7 +202,7 @@ const ProductRelationsManager = ({
 
   // 分类计数
   const counts = useMemo(() => {
-    const map = { compatible: 0, upgrade: 0, replacement: 0 };
+    const map = { compatible: 0, mutual_replacement: 0, replacement: 0, upgrade: 0 };
     relations.forEach((r) => {
       if (map[r.relationType] !== undefined) {
         map[r.relationType] += 1;
@@ -244,6 +262,7 @@ const ProductRelationsManager = ({
       const seenIds = new Set([Number(product.id)]);
       const compatible = [];
       const upgrade = [];
+      const mutualReplacement = [];
       const replacement = [];
 
       relations.forEach((rel) => {
@@ -253,12 +272,13 @@ const ProductRelationsManager = ({
 
         if (rel.relationType === 'compatible') compatible.push(pid);
         else if (rel.relationType === 'upgrade') upgrade.push(pid);
+        else if (rel.relationType === 'mutual_replacement') mutualReplacement.push(pid);
         else if (rel.relationType === 'replacement') replacement.push(pid);
       });
 
       const res = await apiClient(`${apiUrl}/${product.id}/relations`, {
         method: 'PUT',
-        body: JSON.stringify({ compatible, upgrade, replacement })
+        body: JSON.stringify({ compatible, upgrade, mutualReplacement, replacement })
       });
 
       if (!res.ok) {
@@ -278,7 +298,7 @@ const ProductRelationsManager = ({
       }
 
       if (onSave) onSave();
-      showAppToast('产品关系已保存', 'success');
+      showAppToast('产品关系已保存（互匹配/互替代已双向同步）', 'success');
     } catch (err) {
       console.error('保存产品关系失败:', err);
       setActionError(err.message || '保存失败，请稍后重试');
@@ -400,7 +420,7 @@ const ProductRelationsManager = ({
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">
                   关联类型
                 </label>
-                <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-lg">
+                <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-lg">
                   {RELATION_TYPES.map((type) => {
                     const active = selectedRelationType === type.id;
                     return (
@@ -408,13 +428,16 @@ const ProductRelationsManager = ({
                         key={type.id}
                         type="button"
                         onClick={() => setSelectedRelationType(type.id)}
-                        className={`py-1.5 px-2 text-xs font-medium rounded-md transition-all whitespace-nowrap ${
+                        className={`py-1.5 px-2 text-xs font-medium rounded-md transition-all whitespace-nowrap flex items-center justify-center gap-1 ${
                           active
                             ? 'bg-white text-slate-900 shadow-sm'
                             : 'text-slate-600 hover:text-slate-900'
                         }`}
                       >
-                        {type.label}
+                        <span>{type.label}</span>
+                        <span className="text-[10px] font-normal text-slate-400">
+                          {type.directionHint}
+                        </span>
                       </button>
                     );
                   })}
@@ -623,11 +646,15 @@ const ProductRelationsManager = ({
           <div className="text-xs text-slate-500 tabular-nums flex flex-wrap items-center gap-x-2 gap-y-1">
             <span>共 {relations.length} 个关联</span>
             <span aria-hidden="true" className="text-slate-300">·</span>
-            <span className="text-emerald-700">匹配 {counts.compatible}</span>
+            <span className="text-emerald-700">互匹配 {counts.compatible}</span>
             <span aria-hidden="true" className="text-slate-300">·</span>
-            <span className="text-indigo-700">升级 {counts.upgrade}</span>
+            <span className="text-sky-700">互替代 {counts.mutual_replacement}</span>
             <span aria-hidden="true" className="text-slate-300">·</span>
-            <span className="text-amber-700">替换 {counts.replacement}</span>
+            <span className="text-amber-700">可替代 {counts.replacement}</span>
+            <span aria-hidden="true" className="text-slate-300">·</span>
+            <span className="text-indigo-700">升级款 {counts.upgrade}</span>
+            <span aria-hidden="true" className="hidden sm:inline text-slate-300">·</span>
+            <span className="text-slate-400">互匹配/互替代双向同步</span>
           </div>
 
           <div className="flex items-center justify-end gap-2.5">

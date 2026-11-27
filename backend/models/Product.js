@@ -89,7 +89,18 @@ module.exports = (sequelize, DataTypes) => {
   });
 
 
-  // 替代关系（A 可替代 B）
+  // 互替代关系（A 与 B 互为可替代，双向）
+  Product.belongsToMany(models.Product, {
+    through: {
+      model: 'product_relations',
+      scope: { relation_type: 'mutual_replacement' }
+    },
+    as: 'mutualReplacementProducts',
+    foreignKey: 'source_product_id',
+    otherKey: 'target_product_id',
+  });
+
+  // 单向可替代关系（A 可替代 B）
   Product.belongsToMany(models.Product, {
     through: {
       model: 'product_relations',

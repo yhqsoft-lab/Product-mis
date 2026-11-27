@@ -227,18 +227,23 @@ export function showAppToast(message, type = 'info') {
 const RELATED_GROUPS = [
   {
     key: 'compatibleIds',
-    label: '可匹配产品',
+    label: '互匹配产品',
     accentClass: 'text-emerald-700'
+  },
+  {
+    key: 'mutualReplacementIds',
+    label: '互替代产品',
+    accentClass: 'text-sky-700'
+  },
+  {
+    key: 'replacementIds',
+    label: '可替代产品',
+    accentClass: 'text-amber-700'
   },
   {
     key: 'upgradeIds',
     label: '升级款产品',
     accentClass: 'text-indigo-700'
-  },
-  {
-    key: 'replacementIds',
-    label: '可替换产品',
-    accentClass: 'text-amber-700'
   }
 ];
 
@@ -499,18 +504,18 @@ const RELATION_MODAL_TABS = [
   {
     id: 'compatible',
     key: 'compatibleIds',
-    label: '可匹配',
-    fullName: '可匹配产品',
+    label: '互匹配',
+    fullName: '互匹配产品',
     activeClass: 'border-emerald-600 text-emerald-700 bg-emerald-50/40',
     countActiveClass: 'text-emerald-700'
   },
   {
-    id: 'upgrade',
-    key: 'upgradeIds',
-    label: '升级款',
-    fullName: '升级款产品',
-    activeClass: 'border-indigo-600 text-indigo-700 bg-indigo-50/40',
-    countActiveClass: 'text-indigo-700'
+    id: 'mutual_replacement',
+    key: 'mutualReplacementIds',
+    label: '互替代',
+    fullName: '互替代产品',
+    activeClass: 'border-sky-600 text-sky-700 bg-sky-50/40',
+    countActiveClass: 'text-sky-700'
   },
   {
     id: 'replacement',
@@ -519,6 +524,14 @@ const RELATION_MODAL_TABS = [
     fullName: '可替代产品',
     activeClass: 'border-amber-600 text-amber-700 bg-amber-50/40',
     countActiveClass: 'text-amber-700'
+  },
+  {
+    id: 'upgrade',
+    key: 'upgradeIds',
+    label: '升级款',
+    fullName: '升级款产品',
+    activeClass: 'border-indigo-600 text-indigo-700 bg-indigo-50/40',
+    countActiveClass: 'text-indigo-700'
   }
 ];
 

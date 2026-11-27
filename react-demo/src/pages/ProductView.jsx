@@ -207,7 +207,7 @@ export default function ProductSearch() {
     });
     products.forEach((p) => {
       if (p?.id != null) map.set(p.id, p);
-      ['compatibleProducts', 'upgradeProducts', 'replacementProducts'].forEach((key) => {
+      ['compatibleProducts', 'upgradeProducts', 'mutualReplacementProducts', 'replacementProducts'].forEach((key) => {
         if (Array.isArray(p?.[key])) {
           p[key].forEach((rel) => {
             if (rel?.id != null && !map.has(rel.id)) {
@@ -258,6 +258,7 @@ export default function ProductSearch() {
           const statusMeta = getStatusMeta(product.status);
           const compatibleCount = product.compatibleIds?.length || 0;
           const upgradeCount = product.upgradeIds?.length || 0;
+          const mutualReplacementCount = product.mutualReplacementIds?.length || 0;
           const replacementCount = product.replacementIds?.length || 0;
 
           return (
@@ -352,22 +353,22 @@ export default function ProductSearch() {
                           : 'text-slate-400 cursor-default'
                       }`}
                     >
-                      可匹配 {compatibleCount}
+                      互匹配 {compatibleCount}
                     </button>
                     <span aria-hidden="true" className="text-slate-200">/</span>
                     <button
                       type="button"
                       onClick={() => {
-                        if (upgradeCount > 0) openRelationModal(product, 'upgrade');
+                        if (mutualReplacementCount > 0) openRelationModal(product, 'mutual_replacement');
                       }}
-                      disabled={upgradeCount === 0}
+                      disabled={mutualReplacementCount === 0}
                       className={`whitespace-nowrap transition-colors ${
-                        upgradeCount > 0
-                          ? 'text-indigo-600 hover:text-indigo-800 hover:underline font-medium'
+                        mutualReplacementCount > 0
+                          ? 'text-sky-700 hover:text-sky-800 hover:underline font-medium'
                           : 'text-slate-400 cursor-default'
                       }`}
                     >
-                      升级款 {upgradeCount}
+                      互替代 {mutualReplacementCount}
                     </button>
                     <span aria-hidden="true" className="text-slate-200">/</span>
                     <button
@@ -383,6 +384,21 @@ export default function ProductSearch() {
                       }`}
                     >
                       可替代 {replacementCount}
+                    </button>
+                    <span aria-hidden="true" className="text-slate-200">/</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (upgradeCount > 0) openRelationModal(product, 'upgrade');
+                      }}
+                      disabled={upgradeCount === 0}
+                      className={`whitespace-nowrap transition-colors ${
+                        upgradeCount > 0
+                          ? 'text-indigo-600 hover:text-indigo-800 hover:underline font-medium'
+                          : 'text-slate-400 cursor-default'
+                      }`}
+                    >
+                      升级款 {upgradeCount}
                     </button>
                   </div>
 

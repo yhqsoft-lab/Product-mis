@@ -190,8 +190,16 @@ export default function LoginPage() {
             {isLoading ? '处理中...' : (isRegistering ? '注册' : '登录')}
           </button>
 
-          {/* 切换模式 */}
-          <div className="text-center mt-4">
+          {/* 切换模式与返回前台 */}
+          <div className="flex items-center justify-between pt-2 text-sm">
+            <button
+              type="button"
+              onClick={() => navigate('/productview')}
+              className="text-slate-500 hover:text-slate-800 transition-colors"
+              disabled={isLoading}
+            >
+              返回前台首页
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -200,7 +208,7 @@ export default function LoginPage() {
                 setPassword('');
                 setConfirmPassword('');
               }}
-              className="text-indigo-600 hover:text-indigo-800 text-sm"
+              className="text-indigo-600 hover:text-indigo-800 transition-colors"
               disabled={isLoading}
             >
               {isRegistering ? '已有账户？立即登录' : '新用户？创建账户'}

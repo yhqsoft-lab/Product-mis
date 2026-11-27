@@ -1,12 +1,12 @@
 // src/pages/FccView.jsx
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { Info } from 'lucide-react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Info, Search, X, ArrowLeft, Loader2 } from 'lucide-react';
 import { safeFetch } from '../utils/safeFetch';
 import { useFooterRight } from '../components/DashboardLayout';
+import { useDropdownOptions } from '../hooks/useDropdownOptions';
 import {
   formatMediaUrl,
   MediaThumb,
-  PageToolbar,
   CardGridSkeleton,
   EmptyState,
   ErrorState,
@@ -21,6 +21,7 @@ const DEFAULT_PAGE_SIZE = 12;
 export default function FccView() {
   const [fccs, setFccs] = useState([]);
   const [allProducts, setAllProducts] = useState([]);
+  const [productsLoaded, setProductsLoaded] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [detailFcc, setDetailFcc] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -33,13 +34,25 @@ export default function FccView() {
     total: 0,
     totalPages: 0
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState(null);
 
+  const searchInputRef = useRef(null);
+  const { options: dbOptions } = useDropdownOptions();
+
+  const hasSearched = activeSearch.length > 0;
+
+  const brandShortcuts = useMemo(() => {
+    const list = Array.isArray(dbOptions.brand) ? dbOptions.brand : [];
+    return list
+      .filter((item) => item?.value && item.value !== 'Others')
+      .slice(0, 8);
+  }, [dbOptions.brand]);
+
   useFooterRight(
-    pagination.total > 0
-      ? `第 ${pagination.page} / ${Math.max(1, pagination.totalPages)} 页 · 共 ${pagination.total} 条 FCC 记录`
+    hasSearched && pagination.total > 0
+      ? `第 ${pagination.page} / ${Math.max(1, pagination.totalPages)} 页 · 共 ${pagination.total} 条匹配记录`
       : ''
   );
 
@@ -48,57 +61,69 @@ export default function FccView() {
   const API_FCCS = `${BASE_URL}/api/fccs`;
   const API_PRODUCTS = `${BASE_URL}/api/products`;
 
-  const fetchFccs = useCallback(async (search = '', targetPage = 1, targetPageSize = DEFAULT_PAGE_SIZE) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({
-        page: String(targetPage),
-        pageSize: String(targetPageSize)
-      });
-      if (search.trim()) {
-        params.set('search', search.trim());
+  const fetchFccs = useCallback(
+    async (search = '', targetPage = 1, targetPageSize = DEFAULT_PAGE_SIZE) => {
+      const keyword = search.trim();
+      if (!keyword) {
+        setFccs([]);
+        setPagination({ page: 1, pageSize: targetPageSize, total: 0, totalPages: 0 });
+        setLoading(false);
+        setSearching(false);
+        setError(null);
+        return;
       }
-      const url = `${API_FCCS}?${params.toString()}`;
-      const res = await safeFetch(url);
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.message || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setFccs(data);
-        setPagination({
-          page: 1,
-          pageSize: targetPageSize,
-          total: data.length,
-          totalPages: data.length > 0 ? Math.ceil(data.length / targetPageSize) : 0
-        });
-      } else {
-        const items = Array.isArray(data.items) ? data.items : [];
-        const nextPagination = data.pagination || {
-          page: targetPage,
-          pageSize: targetPageSize,
-          total: items.length,
-          totalPages: items.length > 0 ? 1 : 0
-        };
-        setFccs(items);
-        setPagination(nextPagination);
-        if (nextPagination.page && nextPagination.page !== targetPage) {
-          setPage(nextPagination.page);
-        }
-      }
-    } catch (err) {
-      console.error('❌ 获取 FCC 列表失败:', err);
-      setError(err.message);
-      setFccs([]);
-      setPagination({ page: 1, pageSize: targetPageSize, total: 0, totalPages: 0 });
-    } finally {
-      setLoading(false);
-      setSearching(false);
-    }
-  }, [API_FCCS]);
 
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({
+          page: String(targetPage),
+          pageSize: String(targetPageSize),
+          search: keyword
+        });
+        const url = `${API_FCCS}?${params.toString()}`;
+        const res = await safeFetch(url);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setFccs(data);
+          setPagination({
+            page: 1,
+            pageSize: targetPageSize,
+            total: data.length,
+            totalPages: data.length > 0 ? Math.ceil(data.length / targetPageSize) : 0
+          });
+        } else {
+          const items = Array.isArray(data.items) ? data.items : [];
+          const nextPagination = data.pagination || {
+            page: targetPage,
+            pageSize: targetPageSize,
+            total: items.length,
+            totalPages: items.length > 0 ? 1 : 0
+          };
+          setFccs(items);
+          setPagination(nextPagination);
+          if (nextPagination.page && nextPagination.page !== targetPage) {
+            setPage(nextPagination.page);
+          }
+        }
+      } catch (err) {
+        console.error('❌ 获取 FCC 列表失败:', err);
+        setError(err.message);
+        setFccs([]);
+        setPagination({ page: 1, pageSize: targetPageSize, total: 0, totalPages: 0 });
+      } finally {
+        setLoading(false);
+        setSearching(false);
+      }
+    },
+    [API_FCCS]
+  );
+
+  // 搜索防抖：清空输入框时回到大气初始检索态；输入关键词后自动查询
   useEffect(() => {
     const trimmed = searchTerm.trim();
     if (trimmed === activeSearch) {
@@ -108,6 +133,9 @@ export default function FccView() {
     if (trimmed === '') {
       setSearching(false);
       setActiveSearch('');
+      setFccs([]);
+      setPagination({ page: 1, pageSize, total: 0, totalPages: 0 });
+      setError(null);
       setPage(1);
       return;
     }
@@ -115,15 +143,18 @@ export default function FccView() {
     const timer = setTimeout(() => {
       setActiveSearch(trimmed);
       setPage(1);
-    }, 400);
+    }, 450);
     return () => clearTimeout(timer);
-  }, [searchTerm, activeSearch]);
+  }, [searchTerm, activeSearch, pageSize]);
 
   useEffect(() => {
+    if (!activeSearch) return;
     fetchFccs(activeSearch, page, pageSize);
   }, [activeSearch, page, pageSize, fetchFccs]);
 
+  // 仅在首次发起查询后按需加载产品映射表（用于点击适配控制器打开详情弹窗）
   useEffect(() => {
+    if (!hasSearched || productsLoaded) return;
     let active = true;
     const fetchAllProducts = async () => {
       try {
@@ -132,6 +163,7 @@ export default function FccView() {
         const data = await res.json();
         if (active) {
           setAllProducts(Array.isArray(data) ? data : []);
+          setProductsLoaded(true);
         }
       } catch (err) {
         console.error('❌ 获取产品库失败:', err);
@@ -141,7 +173,7 @@ export default function FccView() {
     return () => {
       active = false;
     };
-  }, [API_PRODUCTS]);
+  }, [hasSearched, productsLoaded, API_PRODUCTS]);
 
   const productMap = useMemo(() => {
     const map = new Map();
@@ -173,11 +205,40 @@ export default function FccView() {
     }
   };
 
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    const trimmed = searchTerm.trim();
+    if (!trimmed) {
+      searchInputRef.current?.focus();
+      return;
+    }
+    setSearching(false);
+    if (trimmed === activeSearch) {
+      fetchFccs(trimmed, 1, pageSize);
+    } else {
+      setActiveSearch(trimmed);
+      setPage(1);
+    }
+  };
+
+  const handleQuickSearch = (keyword) => {
+    const trimmed = String(keyword || '').trim();
+    if (!trimmed) return;
+    setSearchTerm(trimmed);
+    setSearching(false);
+    setActiveSearch(trimmed);
+    setPage(1);
+  };
+
   const clearSearch = () => {
     setSearchTerm('');
     setActiveSearch('');
+    setFccs([]);
+    setPagination({ page: 1, pageSize, total: 0, totalPages: 0 });
+    setError(null);
     setPage(1);
     setSearching(false);
+    setTimeout(() => searchInputRef.current?.focus(), 0);
   };
 
   const handlePageSizeChange = (nextSize) => {
@@ -185,26 +246,27 @@ export default function FccView() {
     setPage(1);
   };
 
-  const renderContent = () => {
+  const renderResults = () => {
     if (loading) {
       return <CardGridSkeleton count={Math.min(pageSize, 6)} />;
     }
 
     if (error) {
-      return <ErrorState message={error} onRetry={() => fetchFccs(activeSearch, page, pageSize)} />;
+      return (
+        <ErrorState
+          message={error}
+          onRetry={() => fetchFccs(activeSearch, page, pageSize)}
+        />
+      );
     }
 
     if (fccs.length === 0) {
       return (
         <EmptyState
-          title={searchTerm ? '未找到相关 FCC ID' : '暂无 FCC ID 数据'}
-          description={
-            searchTerm
-              ? `没有找到包含 "${searchTerm}" 的 FCC 记录，请尝试其他关键词。`
-              : '当前库中没有任何 FCC ID 信息。'
-          }
-          actionLabel={searchTerm ? '查看所有 FCC ID' : undefined}
-          onAction={searchTerm ? clearSearch : undefined}
+          title="未找到相关 FCC ID"
+          description={`没有找到与 "${activeSearch}" 匹配的 FCC 记录，请检查编号拼写或尝试品牌关键词。`}
+          actionLabel="返回重新查询"
+          onAction={clearSearch}
         />
       );
     }
@@ -267,7 +329,7 @@ export default function FccView() {
               </p>
             </div>
 
-            {/* 适配的控制器（与后台 FCCID 管理保持统一风格） */}
+            {/* 适配的控制器 */}
             <FccControllerTabs
               fccProducts={fcc.Products}
               onSelectProduct={handleSelectProduct}
@@ -292,28 +354,191 @@ export default function FccView() {
     );
   };
 
-  const subtitleText = activeSearch && !loading
-    ? `搜索 "${activeSearch}" · 共 ${pagination.total} 条记录`
-    : loading
-      ? '正在加载 FCC ID 记录...'
-      : `共 ${pagination.total} 条 FCC 记录`;
+  // 未搜索时：不展示卡片，呈现大气居中的专业检索界面
+  if (!hasSearched) {
+    return (
+      <section className="min-h-[calc(100vh-14.5rem)] flex flex-col justify-center py-10 sm:py-16">
+        <div className="w-full max-w-4xl mx-auto">
+          {/* 顶部主标题区 */}
+          <div className="text-center max-w-2xl mx-auto">
+            <p className="text-xs sm:text-sm font-medium tracking-wide text-indigo-600">
+              Echance Tech · FCC 认证与控制器适配库
+            </p>
+            <h2 className="mt-3 text-3xl sm:text-4xl lg:text-[42px] font-bold tracking-tight text-slate-900 leading-tight [text-wrap:balance]">
+              FCCID 精准查询
+            </h2>
+            <p className="mt-4 text-sm sm:text-base text-slate-500 leading-relaxed">
+              输入设备背面的 FCC ID 编号、品牌名称或产品描述关键词，快速定位对应认证参数及适配遥控器与接收器。
+            </p>
+          </div>
 
+          {/* 核心检索框 */}
+          <form
+            onSubmit={handleSearchSubmit}
+            className="mt-9 sm:mt-11 max-w-2xl mx-auto"
+            role="search"
+            aria-label="FCCID 检索"
+          >
+            <div className="relative flex items-center bg-white border border-slate-200 rounded-2xl shadow-[0_8px_30px_rgb(15,23,42,0.06)] focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/10 transition-all duration-200 p-2 pl-4 sm:pl-5">
+              <Search
+                aria-hidden="true"
+                className="w-5 h-5 text-slate-400 shrink-0 mr-3"
+              />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchTerm}
+                onChange={handleSearchChange}
+                placeholder="输入 FCC ID（如 KUJCE10311）、品牌或关键词..."
+                aria-label="输入 FCC ID、品牌或关键词"
+                autoFocus
+                className="flex-1 min-w-0 h-11 sm:h-12 bg-transparent text-base sm:text-[17px] text-slate-900 placeholder:text-slate-400 focus:outline-none"
+              />
+              {searching && (
+                <Loader2
+                  aria-hidden="true"
+                  className="w-4 h-4 text-indigo-500 animate-spin shrink-0 mx-2"
+                />
+              )}
+              {searchTerm && !searching && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label="清空输入"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0 mr-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                type="submit"
+                className="inline-flex items-center justify-center h-11 sm:h-12 px-6 sm:px-7 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-sm sm:text-[15px] font-medium text-white transition-colors duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2"
+              >
+                查询
+              </button>
+            </div>
+
+            {/* 数据库动态品牌快捷检索 */}
+            {brandShortcuts.length > 0 && (
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-2 text-xs sm:text-sm text-slate-500">
+                <span className="text-slate-400 mr-1">快捷品牌检索：</span>
+                {brandShortcuts.map((brand) => (
+                  <button
+                    key={brand.value}
+                    type="button"
+                    onClick={() => handleQuickSearch(brand.value)}
+                    className="px-2.5 py-1 rounded-md text-slate-600 hover:text-indigo-700 hover:bg-indigo-50 transition-colors whitespace-nowrap"
+                  >
+                    {brand.label || brand.value}
+                  </button>
+                ))}
+              </div>
+            )}
+          </form>
+
+          {/* 底部极简说明栏（无嵌套卡片、无虚假数据、保持桌面端大气格局） */}
+          <div className="mt-14 sm:mt-16 pt-8 border-t border-slate-200/80 grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">
+                01. FCC ID 编号检索
+              </h3>
+              <p className="mt-2 text-xs sm:text-sm text-slate-500 leading-relaxed">
+                直接输入遥控器电池仓或接收器标签上的 FCC ID，精确匹配认证参数与调速规格。
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">
+                02. 品牌与规格筛选
+              </h3>
+              <p className="mt-2 text-xs sm:text-sm text-slate-500 leading-relaxed">
+                支持通过品牌名称、设备类型或功能描述模糊匹配，快速定位同一系列产品。
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">
+                03. 适配控制器直达
+              </h3>
+              <p className="mt-2 text-xs sm:text-sm text-slate-500 leading-relaxed">
+                查询结果自动展示适配的控制套件、遥控器及接收器，点击即可查看详细参数与说明书。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // 已搜索状态：顶部紧凑检索栏 + 匹配结果内容 + 分页
   return (
     <div>
-      <PageToolbar
-        title="FCCID 查询"
-        subtitle={subtitleText}
-        searchTerm={searchTerm}
-        onSearchChange={handleSearchChange}
-        onClearSearch={clearSearch}
-        searchPlaceholder="输入 FCC ID、品牌或描述关键词搜索..."
-        searching={searching}
-        loading={loading}
-      />
+      <div className="mb-6 pb-5 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={clearSearch}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-colors whitespace-nowrap shrink-0"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              返回
+            </button>
+            <h2 className="text-xl font-bold tracking-tight text-slate-900 truncate">
+              FCCID 查询结果
+            </h2>
+          </div>
+          <p className="mt-1.5 text-sm text-slate-500 tabular-nums">
+            {loading
+              ? `正在检索 "${activeSearch}"...`
+              : `关键词 "${activeSearch}" · 共找到 ${pagination.total} 条匹配记录`}
+          </p>
+        </div>
 
-      {renderContent()}
+        <form
+          onSubmit={handleSearchSubmit}
+          className="flex items-center gap-2 w-full lg:w-[440px] shrink-0"
+          role="search"
+        >
+          <div className="relative flex-1 min-w-0">
+            <Search
+              aria-hidden="true"
+              className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchTerm}
+              onChange={handleSearchChange}
+              placeholder="输入 FCC ID、品牌或描述关键词..."
+              aria-label="搜索 FCC ID"
+              className="w-full h-10 pl-10 pr-9 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={clearSearch}
+                aria-label="清空搜索"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="inline-flex items-center justify-center h-10 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-medium text-white transition-colors whitespace-nowrap shrink-0 disabled:opacity-60"
+          >
+            查询
+          </button>
+        </form>
+      </div>
 
-      {!error && (
+      {renderResults()}
+
+      {!error && pagination.total > 0 && (
         <PaginationBar
           page={pagination.page}
           pageSize={pageSize}

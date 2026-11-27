@@ -47,6 +47,12 @@ const buildProductIncludes = () => [
   },
   {
     model: Product,
+    as: 'mutualReplacementProducts',
+    attributes: RELATED_PRODUCT_ATTRIBUTES,
+    through: { attributes: [] }
+  },
+  {
+    model: Product,
     as: 'replacementProducts',
     attributes: RELATED_PRODUCT_ATTRIBUTES,
     through: { attributes: [] }
@@ -60,6 +66,7 @@ const formatProductList = (products) =>
       ...plain,
       compatibleIds: plain.compatibleProducts?.map((cp) => cp.id) || [],
       upgradeIds: plain.upgradeProducts?.map((cp) => cp.id) || [],
+      mutualReplacementIds: plain.mutualReplacementProducts?.map((mp) => mp.id) || [],
       replacementIds: plain.replacementProducts?.map((rp) => rp.id) || []
     };
   });
@@ -415,6 +422,11 @@ exports.deleteProduct = async (req, res) => {
       console.error('删除文件失败:', err);
     }
 
+    await sequelize.query(
+      `DELETE FROM product_relations WHERE source_product_id = ? OR target_product_id = ?`,
+      { replacements: [product.id, product.id] }
+    );
+
     await product.destroy();
     res.json({ message: '删除成功' });
   } catch (err) {
@@ -432,18 +444,19 @@ exports.getProductRelations = async (req, res) => {
       return res.status(404).json({ message: '产品不存在' });
     }
 
-    const [compatible, upgrade, replacement] = await Promise.all([
+    const [compatible, upgrade, mutualReplacement, replacement] = await Promise.all([
       product.getCompatibleProducts(),
       product.getUpgradeProducts(),
+      product.getMutualReplacementProducts(),
       product.getReplacementProducts()
     ]);
 
-    // ✅ 修复：添加 "data" 键名
     res.json({
       success: true,
       data: {
         compatible: compatible.map(p => p.toJSON()),
         upgrade: upgrade.map(p => p.toJSON()),
+        mutualReplacement: mutualReplacement.map(p => p.toJSON()),
         replacement: replacement.map(p => p.toJSON())
       }
     });
@@ -452,16 +465,71 @@ exports.getProductRelations = async (req, res) => {
     res.status(500).json({ message: '服务器错误' });
   }
 };
-// 设置产品关系（全量替换）
+// 启动时幂等补齐历史单向的「互匹配」「互替代」双向记录（不覆盖已有冲突关系，不触碰单向可替代/升级款）
+exports.syncSymmetricProductRelations = async () => {
+  try {
+    const [rows] = await sequelize.query(
+      `SELECT source_product_id, target_product_id, relation_type
+       FROM product_relations
+       WHERE relation_type IN ('compatible', 'upgrade', 'mutual_replacement', 'replacement')`
+    );
+
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    const existingPairs = new Set();
+    for (const row of rows) {
+      existingPairs.add(`${Number(row.source_product_id)}:${Number(row.target_product_id)}`);
+    }
+
+    const missingReverseRows = [];
+    for (const row of rows) {
+      const src = Number(row.source_product_id);
+      const tgt = Number(row.target_product_id);
+      const type = row.relation_type;
+      if (!src || !tgt || src === tgt) continue;
+      if (type !== 'compatible' && type !== 'mutual_replacement') continue;
+
+      const reverseKey = `${tgt}:${src}`;
+      if (!existingPairs.has(reverseKey)) {
+        existingPairs.add(reverseKey);
+        missingReverseRows.push([tgt, src, type]);
+      }
+    }
+
+    if (missingReverseRows.length > 0) {
+      const placeholders = missingReverseRows.map(() => '(?, ?, ?)').join(', ');
+      await sequelize.query(
+        `INSERT INTO product_relations
+         (source_product_id, target_product_id, relation_type)
+         VALUES ${placeholders}`,
+        { replacements: missingReverseRows.flat() }
+      );
+      console.log(`✅ 已自动补齐 ${missingReverseRows.length} 条历史双向产品关联记录`);
+    }
+  } catch (err) {
+    console.warn('⚠️ 补齐双向产品关联失败:', err.message);
+  }
+};
+
+// 设置产品关系（全量替换；compatible 互匹配 / mutual_replacement 互替代双向同步；upgrade 升级款 / replacement 可替代单向）
 exports.setProductRelations = async (req, res) => {
   const sourceId = Number(req.params.id);
   if (!Number.isInteger(sourceId) || sourceId <= 0) {
     return res.status(400).json({ message: '无效的产品 ID' });
   }
 
-  const { compatible = [], upgrade = [], replacement = [] } = req.body || {};
+  const body = req.body || {};
+  const compatible = body.compatible ?? [];
+  const upgrade = body.upgrade ?? [];
+  const mutualReplacement = body.mutualReplacement ?? body.mutual_replacement ?? [];
+  const replacement = body.replacement ?? [];
 
-  if (!Array.isArray(compatible) || !Array.isArray(upgrade) || !Array.isArray(replacement)) {
+  if (
+    !Array.isArray(compatible) ||
+    !Array.isArray(upgrade) ||
+    !Array.isArray(mutualReplacement) ||
+    !Array.isArray(replacement)
+  ) {
     return res.status(400).json({ message: '关系列表格式不正确，必须为数组' });
   }
 
@@ -479,9 +547,10 @@ exports.setProductRelations = async (req, res) => {
 
   const compatibleIds = normalizeIds(compatible);
   const upgradeIds = normalizeIds(upgrade);
+  const mutualReplacementIds = normalizeIds(mutualReplacement);
   const replacementIds = normalizeIds(replacement);
 
-  if (!compatibleIds || !upgradeIds || !replacementIds) {
+  if (!compatibleIds || !upgradeIds || !mutualReplacementIds || !replacementIds) {
     return res.status(400).json({ message: '无效的产品ID' });
   }
 
@@ -491,45 +560,123 @@ exports.setProductRelations = async (req, res) => {
       return res.status(404).json({ message: '产品不存在' });
     }
 
+    // 校验目标产品是否存在，避免写入孤儿反向关联
+    const candidateIds = Array.from(
+      new Set(
+        [...compatibleIds, ...upgradeIds, ...mutualReplacementIds, ...replacementIds].filter(
+          (id) => id !== sourceId
+        )
+      )
+    );
+    let validTargetIdSet = new Set();
+    if (candidateIds.length > 0) {
+      const existingTargets = await Product.findAll({
+        where: { id: { [Op.in]: candidateIds } },
+        attributes: ['id']
+      });
+      validTargetIdSet = new Set(existingTargets.map((item) => Number(item.id)));
+    }
+
     // 去重并排除自身，确保同一目标产品只关联一种关系类型
     const seenTargets = new Set([sourceId]);
-    const relations = [];
+    const forwardRelations = [];
+    const newSymmetricMap = new Map(); // targetId -> 'compatible' | 'mutual_replacement'
 
     const appendRelations = (ids, type) => {
       for (const targetId of ids) {
-        if (!seenTargets.has(targetId)) {
+        if (!seenTargets.has(targetId) && validTargetIdSet.has(targetId)) {
           seenTargets.add(targetId);
-          relations.push([sourceId, targetId, type]);
+          forwardRelations.push([sourceId, targetId, type]);
+          if (type === 'compatible' || type === 'mutual_replacement') {
+            newSymmetricMap.set(targetId, type);
+          }
         }
       }
     };
 
     appendRelations(compatibleIds, 'compatible');
     appendRelations(upgradeIds, 'upgrade');
+    appendRelations(mutualReplacementIds, 'mutual_replacement');
     appendRelations(replacementIds, 'replacement');
 
     await sequelize.transaction(async (t) => {
-      await sequelize.query(
-        `DELETE FROM product_relations
+      // 1. 查询当前产品原有的对称关系目标（用于检测被移除或改为单向关系的目标）
+      const [oldSymmetricRows] = await sequelize.query(
+        `SELECT target_product_id, relation_type
+         FROM product_relations
          WHERE source_product_id = ?
-         AND relation_type IN ('compatible','upgrade', 'replacement')`,
+         AND relation_type IN ('compatible', 'mutual_replacement')`,
         { replacements: [sourceId], transaction: t }
       );
 
-      if (relations.length > 0) {
-        const placeholders = relations.map(() => '(?, ?, ?)').join(', ');
-        const flatValues = relations.flat();
+      const oldSymmetricTargets = new Set(
+        (Array.isArray(oldSymmetricRows) ? oldSymmetricRows : [])
+          .map((row) => Number(row.target_product_id))
+          .filter((id) => Number.isInteger(id) && id > 0 && id !== sourceId)
+      );
 
+      const upsertSymmetricTargets = Array.from(newSymmetricMap.keys());
+      const removedSymmetricTargets = Array.from(oldSymmetricTargets).filter(
+        (targetId) => !newSymmetricMap.has(targetId)
+      );
+
+      // 2. 全量替换正向关系（source_product_id = sourceId）
+      await sequelize.query(
+        `DELETE FROM product_relations
+         WHERE source_product_id = ?
+         AND relation_type IN ('compatible', 'upgrade', 'mutual_replacement', 'replacement')`,
+        { replacements: [sourceId], transaction: t }
+      );
+
+      if (forwardRelations.length > 0) {
+        const placeholders = forwardRelations.map(() => '(?, ?, ?)').join(', ');
         await sequelize.query(
           `INSERT INTO product_relations
            (source_product_id, target_product_id, relation_type)
            VALUES ${placeholders}`,
-          { replacements: flatValues, transaction: t }
+          { replacements: forwardRelations.flat(), transaction: t }
+        );
+      }
+
+      // 3. 同步移除已被取消（或切换为单向升级款/单向可替代）的对称反向关系（B -> A）
+      if (removedSymmetricTargets.length > 0) {
+        const inPlaceholders = removedSymmetricTargets.map(() => '?').join(', ');
+        await sequelize.query(
+          `DELETE FROM product_relations
+           WHERE target_product_id = ?
+           AND source_product_id IN (${inPlaceholders})
+           AND relation_type IN ('compatible', 'mutual_replacement')`,
+          { replacements: [sourceId, ...removedSymmetricTargets], transaction: t }
+        );
+      }
+
+      // 4. 同步新增/切换对称反向关系（B -> A）：先清理 B 指向 A 的旧关系，再写入新对称类型
+      if (upsertSymmetricTargets.length > 0) {
+        const inPlaceholders = upsertSymmetricTargets.map(() => '?').join(', ');
+        await sequelize.query(
+          `DELETE FROM product_relations
+           WHERE target_product_id = ?
+           AND source_product_id IN (${inPlaceholders})
+           AND relation_type IN ('compatible', 'upgrade', 'mutual_replacement', 'replacement')`,
+          { replacements: [sourceId, ...upsertSymmetricTargets], transaction: t }
+        );
+
+        const reverseRelations = upsertSymmetricTargets.map((targetId) => [
+          targetId,
+          sourceId,
+          newSymmetricMap.get(targetId)
+        ]);
+        const reversePlaceholders = reverseRelations.map(() => '(?, ?, ?)').join(', ');
+        await sequelize.query(
+          `INSERT INTO product_relations
+           (source_product_id, target_product_id, relation_type)
+           VALUES ${reversePlaceholders}`,
+          { replacements: reverseRelations.flat(), transaction: t }
         );
       }
     });
 
-    res.json({ success: true, message: '关系更新成功' });
+    res.json({ success: true, message: '关系更新成功（互匹配/互替代已双向同步）' });
   } catch (err) {
     console.error('设置关系失败:', err);
     res.status(500).json({ message: '服务器错误' });
