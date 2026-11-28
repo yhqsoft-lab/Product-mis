@@ -26,7 +26,6 @@ const DEFAULT_PAGE_SIZE = 12;
 
 export default function ProductSearch() {
   const [products, setProducts] = useState([]);
-  const [allProducts, setAllProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSearch, setActiveSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -83,21 +82,9 @@ export default function ProductSearch() {
     setDetailModalStack((prev) => prev.slice(0, -1));
   }, []);
 
-  // API 地址（仅当配置了完整 http(s) 地址时使用，否则使用同源相对路径）
   const rawApiBase = process.env.REACT_APP_API_BASE || '';
   const BASE_URL = /^https?:\/\//i.test(rawApiBase) ? rawApiBase.replace(/\/+$/, '') : '';
   const API_PRODUCTS = `${BASE_URL}/api/products`;
-
-  const fetchAllProducts = useCallback(async () => {
-    try {
-      const res = await safeFetch(API_PRODUCTS);
-      if (!res.ok) throw new Error('获取产品列表失败');
-      const data = await res.json();
-      setAllProducts(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('获取所有产品失败:', err);
-    }
-  }, [API_PRODUCTS]);
 
   const fetchProducts = useCallback(async (search = '', targetPage = 1, targetPageSize = DEFAULT_PAGE_SIZE) => {
     setLoading(true);
@@ -152,10 +139,6 @@ export default function ProductSearch() {
     }
   }, [API_PRODUCTS]);
 
-  useEffect(() => {
-    fetchAllProducts();
-  }, [fetchAllProducts]);
-
   // 搜索防抖：关键词变化时重置至第 1 页
   useEffect(() => {
     const trimmed = searchTerm.trim();
@@ -205,9 +188,6 @@ export default function ProductSearch() {
 
   const relatedProductMap = useMemo(() => {
     const map = new Map();
-    allProducts.forEach((p) => {
-      if (p?.id != null) map.set(p.id, p);
-    });
     products.forEach((p) => {
       if (p?.id != null) map.set(p.id, p);
       ['compatibleProducts', 'upgradeProducts', 'mutualReplacementProducts', 'replacementProducts'].forEach((key) => {
@@ -221,7 +201,7 @@ export default function ProductSearch() {
       });
     });
     return map;
-  }, [allProducts, products]);
+  }, [products]);
 
   const getRelatedProducts = useCallback(
     (ids) => {

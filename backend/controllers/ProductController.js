@@ -34,48 +34,108 @@ const RELATED_PRODUCT_ATTRIBUTES = [
   'image'
 ];
 
-const buildProductIncludes = () => [
-  {
-    model: Product,
-    as: 'compatibleProducts',
-    attributes: RELATED_PRODUCT_ATTRIBUTES,
-    through: { attributes: [] }
-  },
-  {
-    model: Product,
-    as: 'upgradeProducts',
-    attributes: RELATED_PRODUCT_ATTRIBUTES,
-    through: { attributes: [] }
-  },
-  {
-    model: Product,
-    as: 'mutualReplacementProducts',
-    attributes: RELATED_PRODUCT_ATTRIBUTES,
-    through: { attributes: [] }
-  },
-  {
-    model: Product,
-    as: 'replacementProducts',
-    attributes: RELATED_PRODUCT_ATTRIBUTES,
-    through: { attributes: [] }
-  }
+const RELATION_KEY_MAP = {
+  compatible: 'compatibleProducts',
+  upgrade: 'upgradeProducts',
+  mutual_replacement: 'mutualReplacementProducts',
+  replacement: 'replacementProducts'
+};
+
+const LITE_PRODUCT_ATTRIBUTES = [
+  'id',
+  'sku',
+  'model',
+  'brand',
+  'productfccId',
+  'productType',
+  'status',
+  'image'
 ];
 
-const formatProductList = (products) =>
-  products.map((p) => {
-    const plain = p.get({ plain: true });
-    return {
-      ...plain,
-      compatibleIds: plain.compatibleProducts?.map((cp) => cp.id) || [],
-      upgradeIds: plain.upgradeProducts?.map((cp) => cp.id) || [],
-      mutualReplacementIds: plain.mutualReplacementProducts?.map((mp) => mp.id) || [],
-      replacementIds: plain.replacementProducts?.map((rp) => rp.id) || []
-    };
+// 用 2 次轻量索引查询替代 4 路 belongsToMany 笛卡尔积 JOIN，显著提升 MySQL 列表加载速度
+const attachRelationsToProducts = async (products) => {
+  if (!Array.isArray(products) || products.length === 0) return [];
+
+  const plainList = products.map((p) => (typeof p.get === 'function' ? p.get({ plain: true }) : { ...p }));
+  const sourceIds = plainList.map((p) => Number(p.id)).filter((id) => Number.isInteger(id) && id > 0);
+
+  const groupedBySource = new Map();
+  sourceIds.forEach((id) => {
+    groupedBySource.set(id, {
+      compatibleProducts: [],
+      upgradeProducts: [],
+      mutualReplacementProducts: [],
+      replacementProducts: []
+    });
   });
 
-// 获取产品列表（支持模糊搜索与服务端分页）
+  if (sourceIds.length > 0) {
+    const placeholders = sourceIds.map(() => '?').join(',');
+    const [relationRows] = await sequelize.query(
+      `SELECT source_product_id, target_product_id, relation_type
+       FROM product_relations
+       WHERE source_product_id IN (${placeholders})
+         AND relation_type IN ('compatible', 'upgrade', 'mutual_replacement', 'replacement')`,
+      { replacements: sourceIds }
+    );
+
+    if (Array.isArray(relationRows) && relationRows.length > 0) {
+      const targetIdSet = new Set();
+      relationRows.forEach((row) => {
+        const tgtId = Number(row.target_product_id);
+        if (Number.isInteger(tgtId) && tgtId > 0) targetIdSet.add(tgtId);
+      });
+
+      const targetMap = new Map();
+      const targetIds = Array.from(targetIdSet);
+      if (targetIds.length > 0) {
+        const targetProducts = await Product.findAll({
+          where: { id: { [Op.in]: targetIds } },
+          attributes: RELATED_PRODUCT_ATTRIBUTES
+        });
+        targetProducts.forEach((tp) => {
+          const plainTarget = typeof tp.get === 'function' ? tp.get({ plain: true }) : { ...tp };
+          targetMap.set(Number(plainTarget.id), plainTarget);
+        });
+      }
+
+      relationRows.forEach((row) => {
+        const srcId = Number(row.source_product_id);
+        const tgtId = Number(row.target_product_id);
+        const field = RELATION_KEY_MAP[row.relation_type];
+        const bucket = groupedBySource.get(srcId);
+        const targetObj = targetMap.get(tgtId);
+        if (field && bucket && targetObj) {
+          if (!bucket[field].some((item) => Number(item.id) === tgtId)) {
+            bucket[field].push(targetObj);
+          }
+        }
+      });
+    }
+  }
+
+  return plainList.map((plain) => {
+    const rel = groupedBySource.get(Number(plain.id)) || {
+      compatibleProducts: [],
+      upgradeProducts: [],
+      mutualReplacementProducts: [],
+      replacementProducts: []
+    };
+    return {
+      ...plain,
+      ...rel,
+      compatibleIds: rel.compatibleProducts.map((cp) => cp.id),
+      upgradeIds: rel.upgradeProducts.map((cp) => cp.id),
+      mutualReplacementIds: rel.mutualReplacementProducts.map((mp) => mp.id),
+      replacementIds: rel.replacementProducts.map((rp) => rp.id)
+    };
+  });
+};
+
+// 获取产品列表（支持模糊搜索、轻量模式与服务端分页）
 exports.getProducts = async (req, res) => {
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const isLite = req.query.lite === '1' || req.query.lite === 'true';
   const { hasPagination, page, pageSize } = parsePaginationParams(req.query, 12, 100);
 
   try {
@@ -106,25 +166,20 @@ exports.getProducts = async (req, res) => {
 
       let products = [];
       if (total > 0) {
-        const idRows = await Product.findAll({
+        products = await Product.findAll({
           where,
-          attributes: ['id'],
           order: [['id', 'DESC']],
           limit: pageSize,
           offset
         });
-        const pageIds = idRows.map((row) => row.id);
-        if (pageIds.length > 0) {
-          products = await Product.findAll({
-            where: { id: { [Op.in]: pageIds } },
-            include: buildProductIncludes(),
-            order: [['id', 'DESC']]
-          });
-        }
       }
 
+      const items = isLite
+        ? products.map((p) => (typeof p.get === 'function' ? p.get({ plain: true }) : { ...p }))
+        : await attachRelationsToProducts(products);
+
       return res.status(200).json({
-        items: formatProductList(products),
+        items,
         pagination: {
           page: safePage,
           pageSize,
@@ -134,15 +189,27 @@ exports.getProducts = async (req, res) => {
       });
     }
 
-    // 兼容未传分页参数的调用方（如关系选择器），上限保护 500 条
+    // 轻量模式（如关系选择器）：不加载关联子表，速度极快
+    if (isLite) {
+      const products = await Product.findAll({
+        where,
+        attributes: LITE_PRODUCT_ATTRIBUTES,
+        limit: 1000,
+        order: [['id', 'DESC']]
+      });
+      return res.status(200).json(
+        products.map((p) => (typeof p.get === 'function' ? p.get({ plain: true }) : { ...p }))
+      );
+    }
+
+    // 兼容未传分页参数的调用方，上限保护 500 条
     const products = await Product.findAll({
       where,
       limit: 500,
-      include: buildProductIncludes(),
       order: [['id', 'DESC']]
     });
 
-    res.status(200).json(formatProductList(products));
+    res.status(200).json(await attachRelationsToProducts(products));
   } catch (err) {
     console.error('获取产品列表失败:', err);
     res.status(500).json({ message: '服务器内部错误' });

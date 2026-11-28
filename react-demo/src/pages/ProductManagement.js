@@ -58,7 +58,6 @@ export default function ProductManagement() {
 
   // 页面状态
   const [products, setProducts] = useState([]);
-  const [allProducts, setAllProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSearch, setActiveSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -180,17 +179,6 @@ export default function ProductManagement() {
     [dbOptions.status]
   );
 
-  const fetchAllProducts = useCallback(async () => {
-    try {
-      const res = await fetchWithAuth(API_PRODUCTS);
-      if (!res.ok) throw new Error('获取产品列表失败');
-      const data = await res.json();
-      setAllProducts(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('获取所有产品失败:', err);
-    }
-  }, [API_PRODUCTS]);
-
   const fetchProducts = useCallback(async (search = '', targetPage = 1, targetPageSize = DEFAULT_PAGE_SIZE) => {
     setLoading(true);
     setError(null);
@@ -241,11 +229,6 @@ export default function ProductManagement() {
       setSearching(false);
     }
   }, [API_PRODUCTS]);
-
-  useEffect(() => {
-    if (isUserLoading || (!user && !token)) return;
-    fetchAllProducts();
-  }, [fetchAllProducts, isUserLoading, user, token]);
 
   const checkUniqueField = useCallback(async (field, value, productId = null) => {
     if (!value) return '';
@@ -613,7 +596,6 @@ export default function ProductManagement() {
       } else {
         fetchProducts(activeSearch, targetPage, pageSize);
       }
-      fetchAllProducts();
       refreshOptions();
     } catch (err) {
       console.error('💥 提交失败:', err);
@@ -672,7 +654,6 @@ export default function ProductManagement() {
       setProducts((prev) => prev.filter((p) => p.id !== deleteId));
       showAppToast('产品已删除', 'success');
       fetchProducts(activeSearch, page, pageSize);
-      fetchAllProducts();
     } catch (err) {
       console.error('删除失败:', err);
       showAppToast(`删除失败：${err.message}`, 'error');
@@ -689,9 +670,6 @@ export default function ProductManagement() {
 
   const relatedProductMap = useMemo(() => {
     const map = new Map();
-    allProducts.forEach((p) => {
-      if (p?.id != null) map.set(p.id, p);
-    });
     products.forEach((p) => {
       if (p?.id != null) map.set(p.id, p);
       ['compatibleProducts', 'upgradeProducts', 'mutualReplacementProducts', 'replacementProducts'].forEach((key) => {
@@ -705,7 +683,7 @@ export default function ProductManagement() {
       });
     });
     return map;
-  }, [allProducts, products]);
+  }, [products]);
 
   const getRelatedProducts = useCallback(
     (ids) => {
@@ -1568,7 +1546,6 @@ export default function ProductManagement() {
           onClose={closeRelationsModal}
           onSave={() => {
             fetchProducts(activeSearch, page, pageSize);
-            fetchAllProducts();
           }}
           apiUrl="/api/products"
         />

@@ -59,9 +59,15 @@ app.use('/api', (req, res, next) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// ✅ 静态文件服务
-app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
-app.use('/images', express.static(path.join(__dirname, 'images')));
+// ✅ 静态文件服务（上传文件名含唯一时间戳，启用浏览器长缓存避免重复加载）
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads'), {
+  maxAge: '7d',
+  etag: true
+}));
+app.use('/images', express.static(path.join(__dirname, 'images'), {
+  maxAge: '7d',
+  etag: true
+}));
 
 // ✅ 健康检查路由
 app.get('/health', async (req, res) => {
@@ -240,7 +246,7 @@ const startServer = async () => {
         console.warn('⚠️ 自动校验 products 表字段失败:', migrateErr.message);
       }
 
-      // ✅ 自动扩展 product_relations.relation_type 以支持 mutual_replacement（互替代）
+      // ✅ 自动扩展 product_relations.relation_type 并补充索引以加速产品关联查询
       try {
         const [relCols] = await sequelize.query("SHOW COLUMNS FROM `product_relations` LIKE 'relation_type'");
         const relTypeCol = Array.isArray(relCols) ? relCols[0] : null;
@@ -251,8 +257,43 @@ const startServer = async () => {
           );
           console.log('✅ 已自动扩展 product_relations.relation_type 枚举（补充 mutual_replacement）');
         }
+
+        const [relIndexes] = await sequelize.query('SHOW INDEX FROM `product_relations`');
+        const indexedCols = new Set((relIndexes || []).map((idx) => idx.Column_name));
+        if (!indexedCols.has('source_product_id')) {
+          await sequelize.query(
+            'CREATE INDEX `idx_product_relations_source` ON `product_relations` (`source_product_id`)'
+          );
+          console.log('✅ 已自动为 product_relations.source_product_id 添加索引');
+        }
+        if (!indexedCols.has('target_product_id')) {
+          await sequelize.query(
+            'CREATE INDEX `idx_product_relations_target` ON `product_relations` (`target_product_id`)'
+          );
+          console.log('✅ 已自动为 product_relations.target_product_id 添加索引');
+        }
       } catch (relMigrateErr) {
-        console.warn('⚠️ 自动校验 product_relations 表字段失败:', relMigrateErr.message);
+        console.warn('⚠️ 自动校验 product_relations 表字段/索引失败:', relMigrateErr.message);
+      }
+
+      // ✅ 自动为 fcc_products 关联表补充索引以加速 /fccs 与 /fccview 查询
+      try {
+        const [fccLinkIndexes] = await sequelize.query('SHOW INDEX FROM `fcc_products`');
+        const indexedFccCols = new Set((fccLinkIndexes || []).map((idx) => idx.Column_name));
+        if (!indexedFccCols.has('fccId')) {
+          await sequelize.query(
+            'CREATE INDEX `idx_fcc_products_fccId` ON `fcc_products` (`fccId`)'
+          );
+          console.log('✅ 已自动为 fcc_products.fccId 添加索引');
+        }
+        if (!indexedFccCols.has('productId')) {
+          await sequelize.query(
+            'CREATE INDEX `idx_fcc_products_productId` ON `fcc_products` (`productId`)'
+          );
+          console.log('✅ 已自动为 fcc_products.productId 添加索引');
+        }
+      } catch (fccIdxErr) {
+        console.warn('⚠️ 自动校验 fcc_products 表索引失败:', fccIdxErr.message);
       }
     }
 

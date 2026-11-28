@@ -130,7 +130,7 @@ const ProductRelationsManager = ({
 
     try {
       const [productsRes, relationsRes] = await Promise.all([
-        apiClient(`${apiUrl}`),
+        apiClient(`${apiUrl}?lite=1`),
         apiClient(`${apiUrl}/${product.id}/relations`)
       ]);
 

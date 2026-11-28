@@ -662,13 +662,29 @@ const sequelize = {
       ]];
     }
 
+    if (normalized.startsWith('SELECT') && normalized.includes('FROM FCC_PRODUCTS')) {
+      const hasFccIn = normalized.includes('WHERE FCCID IN');
+      const fccIdSet = hasFccIn
+        ? new Set((options.replacements || []).map((v) => Number(v)))
+        : null;
+      const rows = fccProductsLinks
+        .filter((l) => !fccIdSet || fccIdSet.has(Number(l.fccId)))
+        .map((l) => ({ fccId: l.fccId, productId: l.productId }));
+      return [rows];
+    }
+
     if (normalized.startsWith('SELECT') && normalized.includes('FROM PRODUCT_RELATIONS')) {
       const allowedTypes = parseAllowedTypes();
-      const hasSourceFilter = normalized.includes('WHERE SOURCE_PRODUCT_ID = ?');
-      const sourceId = hasSourceFilter ? Number(options.replacements?.[0]) : null;
+      const hasSourceEq = normalized.includes('WHERE SOURCE_PRODUCT_ID = ?');
+      const hasSourceIn = normalized.includes('WHERE SOURCE_PRODUCT_ID IN');
+      const sourceId = hasSourceEq ? Number(options.replacements?.[0]) : null;
+      const sourceIdSet = hasSourceIn
+        ? new Set((options.replacements || []).map((v) => Number(v)))
+        : null;
       const rows = productRelations
         .filter((r) => {
-          if (hasSourceFilter && Number(r.source_product_id) !== sourceId) return false;
+          if (hasSourceEq && Number(r.source_product_id) !== sourceId) return false;
+          if (sourceIdSet && !sourceIdSet.has(Number(r.source_product_id))) return false;
           if (allowedTypes && !allowedTypes.includes(r.relation_type)) return false;
           return true;
         })

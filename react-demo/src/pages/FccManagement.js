@@ -77,10 +77,12 @@ export default function FccManagement() {
   const [selectedFcc, setSelectedFcc] = useState(null);
   const [products, setProducts] = useState([]);
   const [availableProducts, setAvailableProducts] = useState([]);
+  const [availableProductsLoaded, setAvailableProductsLoaded] = useState(false);
   const [productManagementLoading, setProductManagementLoading] = useState(false);
   const [productManagementError, setProductManagementError] = useState('');
   const [showProductManagement, setShowProductManagement] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedProductRelatedMap, setSelectedProductRelatedMap] = useState(() => new Map());
   const [detailFcc, setDetailFcc] = useState(null);
 
   // 删除对话框状态
@@ -256,12 +258,14 @@ export default function FccManagement() {
     setPage(1);
   };
 
+  // 仅在打开「管理适配控制器」弹窗时按需加载轻量产品列表，避免首屏全量查库
   const fetchAvailableProducts = useCallback(async () => {
     try {
-      const res = await safeFetch(PRODUCT_API_URL, { headers: getAuthHeaders() });
+      const res = await safeFetch(`${PRODUCT_API_URL}?lite=1`, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error('获取产品列表失败');
       const data = await res.json();
       setAvailableProducts(Array.isArray(data) ? data : []);
+      setAvailableProductsLoaded(true);
     } catch (err) {
       console.error('获取可选产品失败:', err);
       setProductManagementError('获取可选产品失败');
@@ -293,32 +297,60 @@ export default function FccManagement() {
     }
   }, [API_URL, selectedFcc, getAuthHeaders]);
 
-  const productMap = useMemo(() => {
-    const map = new Map();
-    availableProducts.forEach((p) => map.set(p.id, p));
-    return map;
-  }, [availableProducts]);
-
   const getRelatedProducts = useCallback(
     (ids) => {
       if (!Array.isArray(ids) || ids.length === 0) return [];
-      return availableProducts.filter((p) => ids.includes(p.id));
+      return ids.map((id) => selectedProductRelatedMap.get(id)).filter(Boolean);
     },
-    [availableProducts]
+    [selectedProductRelatedMap]
   );
 
+  // 点击控制器时立即打开详情弹窗，再按需请求该单个产品的关联关系
   const handleSelectProduct = useCallback(
-    (product) => {
+    async (product) => {
       if (!product) return;
-      setSelectedProduct(productMap.get(product.id) || product);
+      setSelectedProduct(product);
+      setSelectedProductRelatedMap(new Map());
+      try {
+        const res = await safeFetch(`${PRODUCT_API_URL}/${product.id}/relations`, {
+          headers: getAuthHeaders()
+        });
+        if (!res.ok) return;
+        const raw = await res.json();
+        const rel = raw?.success && raw?.data ? raw.data : raw || {};
+        const compatible = Array.isArray(rel.compatible) ? rel.compatible : [];
+        const mutualReplacement = Array.isArray(rel.mutualReplacement) ? rel.mutualReplacement : [];
+        const replacement = Array.isArray(rel.replacement) ? rel.replacement : [];
+        const upgrade = Array.isArray(rel.upgrade) ? rel.upgrade : [];
+
+        const map = new Map();
+        [...compatible, ...mutualReplacement, ...replacement, ...upgrade].forEach((item) => {
+          if (item?.id != null) map.set(item.id, item);
+        });
+        setSelectedProductRelatedMap(map);
+        setSelectedProduct((prev) =>
+          prev && prev.id === product.id
+            ? {
+                ...prev,
+                compatibleIds: compatible.map((p) => p.id),
+                mutualReplacementIds: mutualReplacement.map((p) => p.id),
+                replacementIds: replacement.map((p) => p.id),
+                upgradeIds: upgrade.map((p) => p.id)
+              }
+            : prev
+        );
+      } catch (err) {
+        console.error('获取产品关联关系失败:', err);
+      }
     },
-    [productMap]
+    [PRODUCT_API_URL, getAuthHeaders]
   );
 
   useEffect(() => {
-    if (isUserLoading || (!user && !token)) return;
-    fetchAvailableProducts();
-  }, [fetchAvailableProducts, isUserLoading, user, token]);
+    if (showProductManagement && !availableProductsLoaded) {
+      fetchAvailableProducts();
+    }
+  }, [showProductManagement, availableProductsLoaded, fetchAvailableProducts]);
 
   useEffect(() => {
     if (showProductManagement && selectedFcc) {

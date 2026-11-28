@@ -20,9 +20,8 @@ const DEFAULT_PAGE_SIZE = 12;
 
 export default function FccView() {
   const [fccs, setFccs] = useState([]);
-  const [allProducts, setAllProducts] = useState([]);
-  const [productsLoaded, setProductsLoaded] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedProductRelatedMap, setSelectedProductRelatedMap] = useState(() => new Map());
   const [detailFcc, setDetailFcc] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSearch, setActiveSearch] = useState('');
@@ -152,49 +151,51 @@ export default function FccView() {
     fetchFccs(activeSearch, page, pageSize);
   }, [activeSearch, page, pageSize, fetchFccs]);
 
-  // 仅在首次发起查询后按需加载产品映射表（用于点击适配控制器打开详情弹窗）
-  useEffect(() => {
-    if (!hasSearched || productsLoaded) return;
-    let active = true;
-    const fetchAllProducts = async () => {
-      try {
-        const res = await safeFetch(API_PRODUCTS);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (active) {
-          setAllProducts(Array.isArray(data) ? data : []);
-          setProductsLoaded(true);
-        }
-      } catch (err) {
-        console.error('❌ 获取产品库失败:', err);
-      }
-    };
-    fetchAllProducts();
-    return () => {
-      active = false;
-    };
-  }, [hasSearched, productsLoaded, API_PRODUCTS]);
-
-  const productMap = useMemo(() => {
-    const map = new Map();
-    allProducts.forEach((p) => map.set(p.id, p));
-    return map;
-  }, [allProducts]);
-
   const getRelatedProducts = useCallback(
     (ids) => {
       if (!Array.isArray(ids) || ids.length === 0) return [];
-      return allProducts.filter((p) => ids.includes(p.id));
+      return ids.map((id) => selectedProductRelatedMap.get(id)).filter(Boolean);
     },
-    [allProducts]
+    [selectedProductRelatedMap]
   );
 
+  // 点击控制器时立即打开详情弹窗，再按需请求该单个产品的关联关系
   const handleSelectProduct = useCallback(
-    (product) => {
+    async (product) => {
       if (!product) return;
-      setSelectedProduct(productMap.get(product.id) || product);
+      setSelectedProduct(product);
+      setSelectedProductRelatedMap(new Map());
+      try {
+        const res = await safeFetch(`${API_PRODUCTS}/${product.id}/relations`);
+        if (!res.ok) return;
+        const raw = await res.json();
+        const rel = raw?.success && raw?.data ? raw.data : raw || {};
+        const compatible = Array.isArray(rel.compatible) ? rel.compatible : [];
+        const mutualReplacement = Array.isArray(rel.mutualReplacement) ? rel.mutualReplacement : [];
+        const replacement = Array.isArray(rel.replacement) ? rel.replacement : [];
+        const upgrade = Array.isArray(rel.upgrade) ? rel.upgrade : [];
+
+        const map = new Map();
+        [...compatible, ...mutualReplacement, ...replacement, ...upgrade].forEach((item) => {
+          if (item?.id != null) map.set(item.id, item);
+        });
+        setSelectedProductRelatedMap(map);
+        setSelectedProduct((prev) =>
+          prev && prev.id === product.id
+            ? {
+                ...prev,
+                compatibleIds: compatible.map((p) => p.id),
+                mutualReplacementIds: mutualReplacement.map((p) => p.id),
+                replacementIds: replacement.map((p) => p.id),
+                upgradeIds: upgrade.map((p) => p.id)
+              }
+            : prev
+        );
+      } catch (err) {
+        console.error('❌ 获取产品关联关系失败:', err);
+      }
     },
-    [productMap]
+    [API_PRODUCTS]
   );
 
   const handleSearchChange = (e) => {

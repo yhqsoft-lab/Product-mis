@@ -1,9 +1,25 @@
 // controllers/FccController.js
 const { Op } = require('sequelize');
-const { Fcc, Product } = require('../models');
+const { Fcc, Product, sequelize } = require('../models');
 const { ensureOptionExists } = require('./OptionController');
 const path = require('path');
 const fs = require('fs').promises;
+
+const FCC_PRODUCT_ATTRIBUTES = [
+  'id',
+  'sku',
+  'model',
+  'brand',
+  'productfccId',
+  'productType',
+  'description',
+  'httpLink',
+  'nasLink',
+  'status',
+  'manual',
+  'qaDocument',
+  'image'
+];
 
 const parsePaginationParams = (query, defaultPageSize = 12, maxPageSize = 100) => {
   const hasPagination =
@@ -16,6 +32,61 @@ const parsePaginationParams = (query, defaultPageSize = 12, maxPageSize = 100) =
       ? Math.min(rawSize, maxPageSize)
       : defaultPageSize;
   return { hasPagination, page, pageSize };
+};
+
+// 用 2 次轻量索引查询批量挂载关联控制器，避免多表 JOIN 与重复查表开销
+const attachProductsToFccs = async (fccs) => {
+  if (!Array.isArray(fccs) || fccs.length === 0) return [];
+
+  const plainList = fccs.map((f) => (typeof f.get === 'function' ? f.get({ plain: true }) : { ...f }));
+  const fccIds = plainList.map((f) => Number(f.id)).filter((id) => Number.isInteger(id) && id > 0);
+
+  const productsByFcc = new Map();
+  fccIds.forEach((id) => productsByFcc.set(id, []));
+
+  if (fccIds.length > 0) {
+    const placeholders = fccIds.map(() => '?').join(',');
+    const [linkRows] = await sequelize.query(
+      `SELECT fccId, productId FROM fcc_products WHERE fccId IN (${placeholders})`,
+      { replacements: fccIds }
+    );
+
+    if (Array.isArray(linkRows) && linkRows.length > 0) {
+      const productIdSet = new Set();
+      linkRows.forEach((row) => {
+        const pid = Number(row.productId);
+        if (Number.isInteger(pid) && pid > 0) productIdSet.add(pid);
+      });
+
+      const productMap = new Map();
+      const productIds = Array.from(productIdSet);
+      if (productIds.length > 0) {
+        const linkedProducts = await Product.findAll({
+          where: { id: { [Op.in]: productIds } },
+          attributes: FCC_PRODUCT_ATTRIBUTES
+        });
+        linkedProducts.forEach((p) => {
+          const plainProduct = typeof p.get === 'function' ? p.get({ plain: true }) : { ...p };
+          productMap.set(Number(plainProduct.id), plainProduct);
+        });
+      }
+
+      linkRows.forEach((row) => {
+        const fid = Number(row.fccId);
+        const pid = Number(row.productId);
+        const list = productsByFcc.get(fid);
+        const prod = productMap.get(pid);
+        if (list && prod && !list.some((item) => Number(item.id) === pid)) {
+          list.push(prod);
+        }
+      });
+    }
+  }
+
+  return plainList.map((plain) => ({
+    ...plain,
+    Products: productsByFcc.get(Number(plain.id)) || []
+  }));
 };
 
 // 获取 FCC 列表（支持模糊搜索与服务端分页）
@@ -51,21 +122,13 @@ exports.getFccs = async (req, res) => {
 
       let results = [];
       if (total > 0) {
-        const idRows = await Fcc.findAll({
+        const rows = await Fcc.findAll({
           where: whereClause,
-          attributes: ['id'],
           order: [['id', 'DESC']],
           limit: pageSize,
           offset
         });
-        const pageIds = idRows.map((row) => row.id);
-        if (pageIds.length > 0) {
-          results = await Fcc.findAll({
-            where: { id: { [Op.in]: pageIds } },
-            include: [{ model: Product, as: 'Products', through: { attributes: [] } }],
-            order: [['id', 'DESC']]
-          });
-        }
+        results = await attachProductsToFccs(rows);
       }
 
       return res.status(200).json({
@@ -79,12 +142,12 @@ exports.getFccs = async (req, res) => {
       });
     }
 
-    const results = await Fcc.findAll({
+    const rows = await Fcc.findAll({
       where: whereClause,
-      include: [{ model: Product, as: 'Products', through: { attributes: [] } }],
+      limit: 500,
       order: [['id', 'DESC']]
     });
-    res.status(200).json(results);
+    res.status(200).json(await attachProductsToFccs(rows));
   } catch (err) {
     console.error('❌ 搜索FCC失败:', err);
     res.status(500).json({ message: '服务器内部错误' });
