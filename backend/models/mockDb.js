@@ -619,6 +619,74 @@ const DropdownOption = {
   }
 };
 
+const fccSearchStatsData = [
+  {
+    id: 1,
+    keywordKey: 'kujce10311',
+    keyword: 'KUJCE10311',
+    searchCount: 18,
+    lastSearchedAt: now(),
+    createdAt: now(),
+    updatedAt: now()
+  },
+  {
+    id: 2,
+    keywordKey: 'chq7083t',
+    keyword: 'CHQ7083T',
+    searchCount: 12,
+    lastSearchedAt: now(),
+    createdAt: now(),
+    updatedAt: now()
+  }
+];
+let nextFccSearchStatId = 3;
+
+const wrapFccSearchStat = (row) => {
+  const instance = { ...row };
+  instance.get = ({ plain } = {}) => (plain ? { ...row } : instance);
+  instance.toJSON = () => ({ ...row });
+  instance.update = async (updates) => {
+    Object.assign(row, updates, { updatedAt: now() });
+    Object.assign(instance, row);
+    return instance;
+  };
+  return instance;
+};
+
+const FccSearchStat = {
+  name: 'FccSearchStat',
+  async findAll({ where, attributes, order, limit, offset } = {}) {
+    let list = fccSearchStatsData.filter((s) => matchesWhere(s, where));
+    if (Array.isArray(order) && order.length > 0) {
+      list = [...list].sort((a, b) => compareByOrder(a, b, order));
+    }
+    const start = Number.isInteger(offset) && offset > 0 ? offset : 0;
+    if (Number.isInteger(limit) && limit >= 0) {
+      list = list.slice(start, start + limit);
+    } else if (start > 0) {
+      list = list.slice(start);
+    }
+    return list.map((s) => wrapFccSearchStat(pickAttributes(s, attributes)));
+  },
+  async findOne({ where } = {}) {
+    const found = fccSearchStatsData.find((s) => matchesWhere(s, where));
+    return found ? wrapFccSearchStat(found) : null;
+  },
+  async create(data) {
+    const record = {
+      id: nextFccSearchStatId++,
+      keywordKey: data.keywordKey,
+      keyword: data.keyword,
+      searchCount: Number.isInteger(Number(data.searchCount)) ? Number(data.searchCount) : 1,
+      lastSearchedAt: data.lastSearchedAt || now(),
+      createdAt: now(),
+      updatedAt: now()
+    };
+    fccSearchStatsData.push(record);
+    return wrapFccSearchStat(record);
+  }
+};
+
 const ProductWorkWith = {
   name: 'ProductWorkWith',
   async findAll() {
@@ -658,7 +726,8 @@ const sequelize = {
         { Tables_in_mock: 'fccs' },
         { Tables_in_mock: 'fcc_products' },
         { Tables_in_mock: 'product_relations' },
-        { Tables_in_mock: 'dropdown_options' }
+        { Tables_in_mock: 'dropdown_options' },
+        { Tables_in_mock: 'fcc_search_stats' }
       ]];
     }
 
@@ -779,6 +848,7 @@ module.exports = {
   Product,
   Fcc,
   DropdownOption,
+  FccSearchStat,
   ProductWorkWith,
   sequelize
 };

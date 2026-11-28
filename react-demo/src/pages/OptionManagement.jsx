@@ -29,6 +29,7 @@ const CATEGORY_TABS = [
   { key: 'productType', label: '产品类型' },
   { key: 'speed', label: 'AC/DC 规格' },
   { key: 'status', label: '销售状态' },
+  { key: 'quickSearch', label: '快捷检索词' },
   { key: 'role', label: '账号角色' }
 ];
 
@@ -41,6 +42,7 @@ const CATEGORY_META = {
   productType: { label: '产品类型', badgeClass: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
   speed: { label: 'AC/DC 规格', badgeClass: 'text-amber-700 bg-amber-50 border-amber-200' },
   status: { label: '销售状态', badgeClass: 'text-sky-700 bg-sky-50 border-sky-200' },
+  quickSearch: { label: '快捷检索词', badgeClass: 'text-violet-700 bg-violet-50 border-violet-200' },
   role: { label: '账号角色', badgeClass: 'text-slate-700 bg-slate-100 border-slate-200' }
 };
 
@@ -585,7 +587,8 @@ export default function OptionManagement() {
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                  选项存储值 (Value) <span className="text-rose-500">*</span>
+                  {formState.category === 'quickSearch' ? '检索关键词 (Value)' : '选项存储值 (Value)'}{' '}
+                  <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -601,21 +604,30 @@ export default function OptionManagement() {
                     }));
                   }}
                   disabled={submitting || isLockedRole}
-                  placeholder="例如: Hunter / DC 6-speeds"
+                  placeholder={
+                    formState.category === 'quickSearch'
+                      ? '例如: KUJCE10311 / Hunter / DC 6-speeds'
+                      : '例如: Hunter / DC 6-speeds'
+                  }
                   className="w-full h-10 px-3 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:bg-slate-50 disabled:text-slate-500"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                  下拉显示名称 (Label) <span className="text-rose-500">*</span>
+                  {formState.category === 'quickSearch' ? '前台展示词 (Label)' : '下拉显示名称 (Label)'}{' '}
+                  <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={formState.label}
                   onChange={(e) => setFormState((prev) => ({ ...prev, label: e.target.value }))}
                   disabled={submitting}
-                  placeholder="默认与存储值一致，也可填中文名称"
+                  placeholder={
+                    formState.category === 'quickSearch'
+                      ? '默认与检索关键词一致，显示在 FCC ID查询页'
+                      : '默认与存储值一致，也可填中文名称'
+                  }
                   className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                 />
               </div>

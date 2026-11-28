@@ -20,15 +20,33 @@ import {
 export const formatMediaUrl = (path, baseUrl = '') => {
   if (!path || path === 'null' || path === 'undefined') return null;
   if (path.startsWith('http') || path.startsWith('data:')) return path;
-  return `${baseUrl}${path.startsWith('/') ? path : '/' + path}`;
+  const normalized = path.startsWith('/') ? path : '/' + path;
+  const encodedPath = normalized
+    .split('/')
+    .map((seg) => {
+      if (!seg) return '';
+      try {
+        return encodeURIComponent(decodeURIComponent(seg));
+      } catch {
+        return encodeURIComponent(seg);
+      }
+    })
+    .join('/');
+  return `${baseUrl}${encodedPath}`;
 };
 
-const getFileExtensionLabel = (filePath) => {
+export const getDisplayFileName = (filePath) => {
   if (!filePath || typeof filePath !== 'string') return '';
   const clean = filePath.split('?')[0].split('#')[0];
-  const parts = clean.split('.');
-  if (parts.length < 2) return '';
-  return parts[parts.length - 1].toUpperCase();
+  const rawName = clean.split('/').pop() || '';
+  let decoded = rawName;
+  try {
+    decoded = decodeURIComponent(rawName);
+  } catch {
+    decoded = rawName;
+  }
+  const stripped = decoded.replace(/^(?:manual|qa|image)-\d+-\d+__/, '');
+  return stripped || decoded;
 };
 
 const isHttpLink = (val) => typeof val === 'string' && /^https?:\/\//i.test(val.trim());
@@ -450,16 +468,17 @@ export function ProductDetailModal({
 
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">说明书 (PDF)</label>
-              <div className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm truncate">
+              <div className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm min-w-0">
                 {product.manual ? (
                   <a
                     href={formatMediaUrl(product.manual, baseUrl)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-indigo-600 hover:underline inline-flex items-center gap-1.5"
+                    className="text-indigo-600 hover:underline inline-flex items-center gap-1.5 max-w-full min-w-0"
+                    title={getDisplayFileName(product.manual)}
                   >
                     <FileText className="w-4 h-4 shrink-0" />
-                    查看 PDF 说明书
+                    <span className="truncate">{getDisplayFileName(product.manual)}</span>
                   </a>
                 ) : (
                   <span className="text-slate-400">无</span>
@@ -469,22 +488,17 @@ export function ProductDetailModal({
 
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">QA 文档</label>
-              <div className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm truncate">
+              <div className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm min-w-0">
                 {product.qaDocument ? (
                   <a
                     href={formatMediaUrl(product.qaDocument, baseUrl)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-emerald-600 hover:underline inline-flex items-center gap-1.5"
-                    title={product.qaDocument}
+                    className="text-emerald-600 hover:underline inline-flex items-center gap-1.5 max-w-full min-w-0"
+                    title={getDisplayFileName(product.qaDocument)}
                   >
                     <FileSpreadsheet className="w-4 h-4 shrink-0" />
-                    <span>
-                      查看 / 下载 QA 文档
-                      {getFileExtensionLabel(product.qaDocument)
-                        ? ` (${getFileExtensionLabel(product.qaDocument)})`
-                        : ''}
-                    </span>
+                    <span className="truncate">{getDisplayFileName(product.qaDocument)}</span>
                   </a>
                 ) : (
                   <span className="text-slate-400">无</span>

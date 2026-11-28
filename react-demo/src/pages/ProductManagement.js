@@ -24,6 +24,7 @@ import { useFooterRight } from '../components/DashboardLayout';
 import { useDropdownOptions } from '../hooks/useDropdownOptions';
 import {
   formatMediaUrl,
+  getDisplayFileName,
   getStatusMeta,
   MediaThumb,
   PageToolbar,
@@ -815,7 +816,7 @@ export default function ProductManagement() {
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-700 font-medium whitespace-nowrap"
-                        title={product.qaDocument}
+                        title={getDisplayFileName(product.qaDocument)}
                       >
                         <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
                         QA文档
@@ -1395,11 +1396,19 @@ export default function ProductManagement() {
 
                       {pdfFile && (
                         <div className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
-                          <div className="min-w-0">
-                            <p className="text-xs font-medium text-slate-700 truncate">{pdfFile.name}</p>
-                            <p className="text-[11px] text-slate-400 tabular-nums">
-                              {(pdfFile.size / 1024).toFixed(1)} KB
-                            </p>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                            <div className="min-w-0">
+                              <p
+                                className="text-xs font-medium text-slate-700 truncate"
+                                title={pdfFile.name}
+                              >
+                                {pdfFile.name}
+                              </p>
+                              <p className="text-[11px] text-slate-400 tabular-nums">
+                                {(pdfFile.size / 1024).toFixed(1)} KB
+                              </p>
+                            </div>
                           </div>
                           <button
                             type="button"
@@ -1422,9 +1431,11 @@ export default function ProductManagement() {
                             href={formatMediaUrl(newProduct.manual, BASE_URL)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-xs text-indigo-600 hover:underline truncate"
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:underline min-w-0 flex-1"
+                            title={getDisplayFileName(newProduct.manual)}
                           >
-                            {newProduct.manual}
+                            <FileText className="w-4 h-4 shrink-0" />
+                            <span className="truncate">{getDisplayFileName(newProduct.manual)}</span>
                           </a>
                           <button
                             type="button"
@@ -1465,11 +1476,19 @@ export default function ProductManagement() {
 
                       {qaFile && (
                         <div className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
-                          <div className="min-w-0">
-                            <p className="text-xs font-medium text-slate-700 truncate">{qaFile.name}</p>
-                            <p className="text-[11px] text-slate-400 tabular-nums">
-                              {(qaFile.size / 1024).toFixed(1)} KB
-                            </p>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <div className="min-w-0">
+                              <p
+                                className="text-xs font-medium text-slate-700 truncate"
+                                title={qaFile.name}
+                              >
+                                {qaFile.name}
+                              </p>
+                              <p className="text-[11px] text-slate-400 tabular-nums">
+                                {(qaFile.size / 1024).toFixed(1)} KB
+                              </p>
+                            </div>
                           </div>
                           <button
                             type="button"
@@ -1492,9 +1511,11 @@ export default function ProductManagement() {
                             href={formatMediaUrl(newProduct.qaDocument, BASE_URL)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-xs text-indigo-600 hover:underline truncate"
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 hover:underline min-w-0 flex-1"
+                            title={getDisplayFileName(newProduct.qaDocument)}
                           >
-                            {newProduct.qaDocument}
+                            <FileSpreadsheet className="w-4 h-4 shrink-0" />
+                            <span className="truncate">{getDisplayFileName(newProduct.qaDocument)}</span>
                           </a>
                           <button
                             type="button"

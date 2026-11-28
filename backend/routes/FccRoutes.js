@@ -22,6 +22,9 @@ const handleMulterError = (err, req, res, next) => {
   next();
 };
 
+// 🔥 0. 热门查询统计（公开接口，必须在 /:id 之前定义）
+router.get('/hot-searches', FccController.getHotSearches);
+
 // 📦 1. 适配控制器管理路由（必须在 /:id 之前定义）
 router.route('/:id/products')
   .get(FccController.getProductsByFcc)

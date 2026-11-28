@@ -1,6 +1,6 @@
 // controllers/FccController.js
 const { Op } = require('sequelize');
-const { Fcc, Product, sequelize } = require('../models');
+const { Fcc, Product, FccSearchStat, sequelize } = require('../models');
 const { ensureOptionExists } = require('./OptionController');
 const path = require('path');
 const fs = require('fs').promises;
@@ -89,9 +89,78 @@ const attachProductsToFccs = async (fccs) => {
   }));
 };
 
+// 异步累计有效查询词的搜索次数（仅记录 2~64 字符且有匹配结果的查询）
+const recordFccSearchStat = async (rawKeyword) => {
+  const keyword = String(rawKeyword || '').trim().replace(/\s+/g, ' ');
+  if (keyword.length < 2 || keyword.length > 64) return;
+  const keywordKey = keyword.toLowerCase();
+
+  try {
+    if (typeof sequelize.getDialect === 'function' && sequelize.getDialect() === 'mysql') {
+      await sequelize.query(
+        'INSERT INTO `fcc_search_stats` (`keywordKey`, `keyword`, `searchCount`, `lastSearchedAt`, `createdAt`, `updatedAt`) VALUES (?, ?, 1, NOW(), NOW(), NOW()) ON DUPLICATE KEY UPDATE `searchCount` = `searchCount` + 1, `keyword` = VALUES(`keyword`), `lastSearchedAt` = NOW(), `updatedAt` = NOW()',
+        { replacements: [keywordKey, keyword] }
+      );
+      return;
+    }
+
+    if (FccSearchStat) {
+      const existing = await FccSearchStat.findOne({ where: { keywordKey } });
+      if (existing) {
+        await existing.update({
+          keyword,
+          searchCount: Number(existing.searchCount || 0) + 1,
+          lastSearchedAt: new Date()
+        });
+      } else {
+        await FccSearchStat.create({
+          keywordKey,
+          keyword,
+          searchCount: 1,
+          lastSearchedAt: new Date()
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ 记录 FCC 搜索热词失败:', err.message);
+  }
+};
+
+// 获取查询次数最多的热门快捷检索词
+exports.getHotSearches = async (req, res) => {
+  const rawLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 20) : 8;
+
+  try {
+    if (!FccSearchStat) {
+      return res.status(200).json({ items: [] });
+    }
+    const rows = await FccSearchStat.findAll({
+      attributes: ['keyword', 'searchCount', 'lastSearchedAt'],
+      order: [
+        ['searchCount', 'DESC'],
+        ['lastSearchedAt', 'DESC']
+      ],
+      limit
+    });
+    const items = rows.map((row) => {
+      const plain = typeof row.get === 'function' ? row.get({ plain: true }) : row;
+      return {
+        keyword: plain.keyword,
+        count: Number(plain.searchCount || 0)
+      };
+    });
+    res.status(200).json({ items });
+  } catch (err) {
+    console.error('❌ 获取 FCC 热门检索词失败:', err);
+    res.status(200).json({ items: [] });
+  }
+};
+
 // 获取 FCC 列表（支持模糊搜索与服务端分页）
 exports.getFccs = async (req, res) => {
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const shouldTrack = req.query.track === '1';
   const { hasPagination, page, pageSize } = parsePaginationParams(req.query, 12, 100);
 
   try {
@@ -129,6 +198,9 @@ exports.getFccs = async (req, res) => {
           offset
         });
         results = await attachProductsToFccs(rows);
+        if (search && shouldTrack && safePage === 1) {
+          recordFccSearchStat(search);
+        }
       }
 
       return res.status(200).json({
@@ -147,6 +219,9 @@ exports.getFccs = async (req, res) => {
       limit: 500,
       order: [['id', 'DESC']]
     });
+    if (search && shouldTrack && rows.length > 0) {
+      recordFccSearchStat(search);
+    }
     res.status(200).json(await attachProductsToFccs(rows));
   } catch (err) {
     console.error('❌ 搜索FCC失败:', err);

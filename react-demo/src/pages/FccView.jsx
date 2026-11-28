@@ -42,12 +42,10 @@ export default function FccView() {
 
   const hasSearched = activeSearch.length > 0;
 
-  const brandShortcuts = useMemo(() => {
-    const list = Array.isArray(dbOptions.brand) ? dbOptions.brand : [];
-    return list
-      .filter((item) => item?.value && item.value !== 'Others')
-      .slice(0, 8);
-  }, [dbOptions.brand]);
+  const quickSearchShortcuts = useMemo(() => {
+    const list = Array.isArray(dbOptions.quickSearch) ? dbOptions.quickSearch : [];
+    return list.filter((item) => item?.value);
+  }, [dbOptions.quickSearch]);
 
   useFooterRight(
     hasSearched && pagination.total > 0
@@ -362,15 +360,9 @@ export default function FccView() {
         <div className="w-full max-w-4xl mx-auto">
           {/* 顶部主标题区 */}
           <div className="text-center max-w-2xl mx-auto">
-            <p className="text-xs sm:text-sm font-medium tracking-wide text-indigo-600">
-              Echance Tech · FCC 认证与控制器适配库
-            </p>
-            <h2 className="mt-3 text-3xl sm:text-4xl lg:text-[42px] font-bold tracking-tight text-slate-900 leading-tight [text-wrap:balance]">
-              FCCID 精准查询
+            <h2 className="text-3xl sm:text-4xl lg:text-[42px] font-bold tracking-tight text-slate-900 leading-tight [text-wrap:balance]">
+              FCC ID查询
             </h2>
-            <p className="mt-4 text-sm sm:text-base text-slate-500 leading-relaxed">
-              输入设备背面的 FCC ID 编号、品牌名称或产品描述关键词，快速定位对应认证参数及适配遥控器与接收器。
-            </p>
           </div>
 
           {/* 核心检索框 */}
@@ -422,18 +414,18 @@ export default function FccView() {
               </button>
             </div>
 
-            {/* 数据库动态品牌快捷检索 */}
-            {brandShortcuts.length > 0 && (
+            {/* 后台可配置的快捷检索词 */}
+            {quickSearchShortcuts.length > 0 && (
               <div className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-2 text-xs sm:text-sm text-slate-500">
-                <span className="text-slate-400 mr-1">快捷品牌检索：</span>
-                {brandShortcuts.map((brand) => (
+                <span className="text-slate-400 mr-1">快捷检索：</span>
+                {quickSearchShortcuts.map((item) => (
                   <button
-                    key={brand.value}
+                    key={item.id ?? item.value}
                     type="button"
-                    onClick={() => handleQuickSearch(brand.value)}
+                    onClick={() => handleQuickSearch(item.value)}
                     className="px-2.5 py-1 rounded-md text-slate-600 hover:text-indigo-700 hover:bg-indigo-50 transition-colors whitespace-nowrap"
                   >
-                    {brand.label || brand.value}
+                    {item.label || item.value}
                   </button>
                 ))}
               </div>

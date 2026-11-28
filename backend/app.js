@@ -295,6 +295,26 @@ const startServer = async () => {
       } catch (fccIdxErr) {
         console.warn('⚠️ 自动校验 fcc_products 表索引失败:', fccIdxErr.message);
       }
+
+      // ✅ 确保 fcc_search_stats 热词统计表存在（用于 /fccview 快捷检索）
+      try {
+        await sequelize.query(`
+          CREATE TABLE IF NOT EXISTS \`fcc_search_stats\` (
+            \`id\` INT NOT NULL AUTO_INCREMENT,
+            \`keywordKey\` VARCHAR(100) NOT NULL,
+            \`keyword\` VARCHAR(100) NOT NULL,
+            \`searchCount\` INT NOT NULL DEFAULT 1,
+            \`lastSearchedAt\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            \`createdAt\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            \`updatedAt\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (\`id\`),
+            UNIQUE KEY \`uniq_fcc_search_stats_keyword_key\` (\`keywordKey\`),
+            KEY \`idx_fcc_search_stats_hot\` (\`searchCount\`, \`lastSearchedAt\`)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        `);
+      } catch (hotTableErr) {
+        console.warn('⚠️ 自动校验 fcc_search_stats 表失败:', hotTableErr.message);
+      }
     }
 
     // ✅ 初始化并同步数据库下拉选项表（dropdown_options）

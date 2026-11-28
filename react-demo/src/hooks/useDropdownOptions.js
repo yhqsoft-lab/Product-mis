@@ -7,7 +7,8 @@ const EMPTY_OPTIONS = {
   productType: [],
   speed: [],
   status: [],
-  role: []
+  role: [],
+  quickSearch: []
 };
 
 export function useDropdownOptions() {
@@ -35,7 +36,8 @@ export function useDropdownOptions() {
         productType: Array.isArray(grouped.productType) ? grouped.productType : [],
         speed: Array.isArray(grouped.speed) ? grouped.speed : [],
         status: Array.isArray(grouped.status) ? grouped.status : [],
-        role: Array.isArray(grouped.role) ? grouped.role : []
+        role: Array.isArray(grouped.role) ? grouped.role : [],
+        quickSearch: Array.isArray(grouped.quickSearch) ? grouped.quickSearch : []
       });
     } catch (err) {
       console.error('❌ 加载数据库下拉选项失败:', err);

@@ -2,7 +2,7 @@
 const { Op } = require('sequelize');
 const { DropdownOption, Product, Fcc } = require('../models');
 
-const VALID_CATEGORIES = ['brand', 'productType', 'speed', 'status', 'role'];
+const VALID_CATEGORIES = ['brand', 'productType', 'speed', 'status', 'role', 'quickSearch'];
 const SYSTEM_LOCKED_CATEGORIES = new Set(['role']);
 
 // 仅在数据库 dropdown_options 表首次完全为空时用于初始化写入数据库
@@ -50,7 +50,12 @@ const INITIAL_DB_SEED = [
     label: '成员',
     description: '仅浏览前台查询，无法进后台或写入',
     sortOrder: 30
-  }
+  },
+  // FCC 前台快捷检索词 (quickSearch)
+  { category: 'quickSearch', value: 'Hunter', label: 'Hunter', sortOrder: 10 },
+  { category: 'quickSearch', value: 'Harbor Breeze', label: 'Harbor Breeze', sortOrder: 20 },
+  { category: 'quickSearch', value: 'Hampton Bay', label: 'Hampton Bay', sortOrder: 30 },
+  { category: 'quickSearch', value: 'CoreBay', label: 'CoreBay', sortOrder: 40 }
 ];
 
 const toPlain = (row) => (row && typeof row.get === 'function' ? row.get({ plain: true }) : row);
@@ -151,6 +156,31 @@ const syncInitialOptions = async () => {
         }
       }
     }
+
+    // 如果历史数据库中尚未初始化快捷检索词，则默认同步启用中的品牌作为初始快捷检索词
+    const quickSearchCount = await DropdownOption.count({ where: { category: 'quickSearch' } });
+    if (quickSearchCount === 0) {
+      const existingBrands = await DropdownOption.findAll({
+        where: { category: 'brand', isActive: true },
+        order: [
+          ['sortOrder', 'ASC'],
+          ['id', 'ASC']
+        ],
+        limit: 6
+      });
+      if (existingBrands.length > 0) {
+        for (const b of existingBrands) {
+          const plain = toPlain(b);
+          if (plain?.value && plain.value !== 'Others') {
+            await ensureOptionExists('quickSearch', plain.value, plain.label || plain.value);
+          }
+        }
+      } else {
+        for (const item of INITIAL_DB_SEED.filter((s) => s.category === 'quickSearch')) {
+          await ensureOptionExists(item.category, item.value, item.label, item.description);
+        }
+      }
+    }
   } catch (err) {
     console.warn('⚠️ 初始化 dropdown_options 失败:', err.message);
   }
@@ -195,7 +225,8 @@ exports.getOptions = async (req, res) => {
       productType: [],
       speed: [],
       status: [],
-      role: []
+      role: [],
+      quickSearch: []
     };
 
     for (const item of plainRows) {

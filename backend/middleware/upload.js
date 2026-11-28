@@ -9,18 +9,62 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
+const decodeOriginalName = (rawName = '') => {
+  if (!rawName || typeof rawName !== 'string') return '';
+  if (/[^\u0000-\u00FF]/.test(rawName)) {
+    return rawName;
+  }
+  if (/[\u0080-\u00FF]/.test(rawName)) {
+    try {
+      const decoded = Buffer.from(rawName, 'latin1').toString('utf8');
+      if (decoded && !decoded.includes('\uFFFD')) {
+        return decoded;
+      }
+    } catch {
+      // ignore and fall back
+    }
+  }
+  return rawName;
+};
+
+const sanitizeDisplayBaseName = (originalName = '', ext = '') => {
+  const decoded = decodeOriginalName(originalName);
+  const rawBase = ext ? decoded.slice(0, Math.max(0, decoded.length - ext.length)) : decoded;
+  const cleaned = rawBase
+    .replace(/[\u0000-\u001F\u007F/\\:*?"<>|#%&?+]/g, '_')
+    .replace(/\s+/g, ' ')
+    .replace(/\.+$/g, '')
+    .trim();
+
+  if (!cleaned) return '';
+
+  let result = '';
+  let byteLen = 0;
+  for (const ch of cleaned) {
+    const chBytes = Buffer.byteLength(ch, 'utf8');
+    if (result.length >= 60 || byteLen + chBytes > 140) break;
+    result += ch;
+    byteLen += chBytes;
+  }
+  return result.trim();
+};
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
+    const ext = path.extname(file.originalname || '').toLowerCase();
     const uniqueSuffix = Date.now() + '-' + Math.floor(Math.random() * 1000);
 
     if (file.fieldname === 'manual') {
-      cb(null, 'manual-' + uniqueSuffix + ext);
+      const safeBase = sanitizeDisplayBaseName(file.originalname, ext);
+      const namePart = safeBase ? `__${safeBase}` : '';
+      cb(null, `manual-${uniqueSuffix}${namePart}${ext}`);
     } else if (file.fieldname === 'qaDocument') {
-      cb(null, 'qa-' + uniqueSuffix + ext);
+      const safeBase = sanitizeDisplayBaseName(file.originalname, ext);
+      const namePart = safeBase ? `__${safeBase}` : '';
+      cb(null, `qa-${uniqueSuffix}${namePart}${ext}`);
     } else {
       cb(null, 'image-' + uniqueSuffix + ext);
     }
